@@ -11,6 +11,7 @@ const sidebars = {
                 'intro',
                 'getting-started/installation',
                 'getting-started/configuration',
+                'core/lifecycle',
             ],
         },
         {
@@ -18,7 +19,6 @@ const sidebars = {
             label: 'Core Concepts',
             collapsed: false,
             items: [
-                'core/lifecycle',
                 'core/dependency-injection',
                 'core/events',
                 'core/registries',
@@ -36,6 +36,8 @@ const sidebars = {
                 'forms/forms',
                 'validation/validation',
                 'core/cache',
+                'core/request',
+                'core/response',
             ],
         },
         {
