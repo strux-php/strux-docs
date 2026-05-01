@@ -1,152 +1,403 @@
 ---
 title: Queue System
-sidebar_position: 1
+slug: /queue
 description: Database-driven background job processing in Strux.
 ---
 
 # Queue System
 
-Strux includes a **database-driven queue system** for offloading long-running or non-blocking tasks such as:
+## Overview
+
+Strux includes a robust, database-driven queue system designed for processing background jobs outside of the HTTP request lifecycle.
+
+Queues allow you to offload long-running or non-blocking tasks such as:
 
 - Sending emails
 - Processing uploads
 - Generating reports
-- Syncing external APIs
+- Syncing with external APIs
+- Data imports and exports
+- Webhook processing
 
-By delegating this work to background workers, your application remains **fast and responsive**.
-
----
-
-## Getting Started
-
-### Initialize the Queue Table
-
-Create the table used to store queued jobs:
-
-```bash
-php console queue:init
-````
-
-This creates a `_jobs` table (or the name defined in `config/queue.php`).
+By delegating these tasks to background workers, your application remains fast and responsive for end users.
 
 ---
 
-## Creating a Job
+## Why Use Queues?
 
-Generate a job class via the CLI:
+Without queues:
 
-```bash
-php console new:job SendWelcomeEmailJob
-```
+- The user waits for the task to complete.
+- Long processes block HTTP responses.
+- Slow external services degrade performance.
 
-### Example Job
+With queues:
 
-```php
-namespace App\Jobs;
+- Tasks are executed asynchronously.
+- HTTP responses return immediately.
+- Background workers handle processing safely and reliably.
 
-use App\Core\Queue\Job;
-use App\Core\Mail\MailerInterface;
-use App\Models\User;
-
-class SendWelcomeEmailJob extends Job
-{
-    public function __construct(
-        protected User $user
-    ) {}
-
-    public function handle(MailerInterface $mailer): void
-    {
-        $mailer->to($this->user->email)
-               ->subject('Welcome!')
-               ->send('emails/welcome', [
-                   'name' => $this->user->firstname
-               ]);
-    }
-}
-```
-
----
-
-## Dispatching Jobs
-
-```php
-use App\Jobs\SendWelcomeEmailJob;
-use App\Core\Queue\Queue;
-
-$queue = container(Queue::class);
-
-// Dispatch immediately
-$queue->push(new SendWelcomeEmailJob($user));
-
-// Dispatch after 5 minutes
-$queue->later(300, new SendWelcomeEmailJob($user));
-```
-
----
-
-## Running the Worker
-
-Start the queue worker:
-
-```bash
-php console queue:start
-```
-
-:::info Production Tip
-Use a process manager like **Supervisor**, **systemd**, or **PM2** to keep workers running.
+:::info
+Queues improve perceived performance and system scalability.
 :::
 
 ---
 
-## Configuration
+# Getting Started
 
-Queue configuration lives in `config/queue.php`:
+## Initialize the Queue Tables
+
+Before using the queue, you must create the required database tables.
+
+From your project root:
+
+```bash
+php bin/console queue:init
+````
+
+This command creates:
+
+| Table         | Purpose                                |
+| ------------- | -------------------------------------- |
+| `jobs`        | Stores active and pending jobs         |
+| `failed_jobs` | Stores jobs that exceeded retry limits |
+
+---
+
+# Configuration
+
+Queue configuration is defined in:
+
+```
+src/Config/Queue.php
+```
+
+This configuration determines:
+
+* Default queue connection
+* Available drivers
+* Retry behavior
+* Failed job storage
+
+---
+
+## Default Connection
+
+You can switch between:
+
+| Driver     | Behavior                                        |
+| ---------- | ----------------------------------------------- |
+| `sync`     | Executes immediately (no background processing) |
+| `database` | Uses background workers                         |
+
+Example:
 
 ```php
-return [
-    'queue' => [
-        'default' => env('QUEUE_CONNECTION', 'database'),
-        'connections' => [
-            'database' => [
-                'driver' => 'database',
-                'table' => '_jobs',
-                'queue' => 'default',
-                'retry_after' => 90,
-            ],
-        ],
-    ]
-];
+'default' => env('QUEUE_CONNECTION', 'database'),
 ```
 
 ---
 
-## Architecture & Job Lifecycle
+## Retry Behavior
 
-**1. Dispatch**
-Jobs are serialized and stored in the `_jobs` table.
+The `retry_after` option defines how long (in seconds) a worker will wait before considering a job stalled.
 
-**2. Polling**
-Workers scan for available jobs (`reserved_at IS NULL`).
+Example:
 
-**3. Locking**
-`reserved_at` is set to prevent duplicate processing.
+```php
+'retry_after' => 90
+```
 
-**4. Execution**
-The job is deserialized and `handle()` is executed with DI support.
+If a worker crashes or stalls:
 
-**5. Completion**
-Jobs are deleted on success.
-
-**6. Failure Handling**
-
-* `attempts` increments
-* Jobs may be retried or moved to `failed_jobs`
+* The job is automatically released
+* It becomes available again
+* Another worker may process it
 
 ---
 
-## Best Practices
+# Queued Event Listeners (Recommended)
 
-* Pass IDs or DTOs, not heavy objects
-* Ensure jobs are **idempotent**
-* Use dependency injection in `handle()`
-* Prefer multiple small jobs over large ones
+The most seamless way to use queues in Strux is through the Event System.
+
+If an Event Listener implements:
+
+```
+ShouldQueue
+```
+
+Strux automatically dispatches it to the queue instead of executing it synchronously.
+
+---
+
+## How It Works
+
+1. An event is dispatched.
+2. Strux detects the `ShouldQueue` contract.
+3. A background job is created.
+4. The HTTP request continues immediately.
+5. A worker processes the job asynchronously.
+
+---
+
+## Example Use Cases
+
+* Sending welcome emails
+* Processing notifications
+* Logging activity
+* Analytics tracking
+* Broadcasting events
+
+---
+
+# Manual Jobs
+
+If your task is not tied to the Event System, you can create and dispatch jobs manually.
+
+A job is a simple class containing a `handle()` method.
+
+---
+
+## Dispatching a Job
+
+You push a job onto the queue using the `Queue` service.
+
+After dispatching:
+
+* The job is serialized
+* Inserted into the `jobs` table
+* Awaiting processing by a worker
+
+---
+
+# Running the Worker
+
+To process queued jobs:
+
+```bash
+php bin/console queue:work
+```
+
+The worker:
+
+* Polls for available jobs
+* Locks them safely
+* Executes them
+* Handles failures and retries
+
+---
+
+:::info Production Tip
+The worker runs indefinitely.
+
+In production, use a process monitor such as:
+
+* Supervisor
+* systemd
+* PM2
+* Docker restart policies
+
+This ensures the worker restarts automatically if it crashes.
+:::
+
+---
+
+# Atomic Locks & Concurrency
+
+Strux’s database queue uses atomic row locking:
+
+```
+FOR UPDATE SKIP LOCKED
+```
+
+This guarantees:
+
+* Multiple workers can run simultaneously
+* No job is processed twice
+* Safe concurrent processing
+
+You can safely scale horizontally by running multiple worker processes.
+
+---
+
+# Job Lifecycle
+
+Understanding the lifecycle helps with debugging and reliability.
+
+### 1. Dispatch
+
+The job object is serialized and inserted into the `jobs` table.
+
+---
+
+### 2. Polling
+
+The worker searches for jobs where:
+
+```
+reserved_at IS NULL
+```
+
+---
+
+### 3. Locking
+
+The job row is locked to prevent duplicate execution.
+
+---
+
+### 4. Execution
+
+* The job is unserialized
+* Dependencies are resolved via the container
+* The `handle()` method runs
+
+---
+
+### 5. Success
+
+The job is permanently removed from the `jobs` table.
+
+---
+
+### 6. Failure & Retries
+
+If an exception occurs:
+
+* The job is released back into the queue
+* The `attempts` counter increments
+* The job is retried
+
+After 3 failed attempts:
+
+* It is removed from `jobs`
+* Logged into `failed_jobs`
+* The full exception stack trace is stored
+
+---
+
+---
+
+# Failure Handling
+
+Failed jobs are not lost.
+
+You can:
+
+* Inspect failure details
+* Retry failed jobs manually
+* Log alerts
+* Create monitoring dashboards
+
+---
+
+# Best Practices
+
+## 1. Keep Payloads Small
+
+Pass lightweight data such as:
+
+* IDs
+* Scalars
+* Small arrays
+
+Avoid:
+
+* Full database models
+* Large objects
+* Heavy in-memory structures
+
+Fetch fresh data inside `handle()`.
+
+---
+
+## 2. Design for Idempotency
+
+Jobs may run more than once due to:
+
+* Worker crashes
+* Timeouts
+* Retry logic
+
+Ensure your job can safely execute multiple times without corrupting data.
+
+---
+
+## 3. Use Dependency Injection Properly
+
+Constructor arguments are serialized into the database.
+
+Dependencies in `handle()` are resolved fresh by the worker.
+
+Preferred pattern:
+
+* Constructor → minimal data
+* `handle()` → injected services
+
+---
+
+## 4. Avoid Long Blocking Calls
+
+If interacting with:
+
+* External APIs
+* Slow services
+* Heavy computation
+
+Implement:
+
+* Timeouts
+* Retry logic
+* Graceful failure handling
+
+---
+
+## 5. Monitor Queue Health
+
+In production, monitor:
+
+* Job throughput
+* Failure rate
+* Worker uptime
+* Table growth
+
+Queues are infrastructure — treat them as critical systems.
+
+---
+
+# When to Use Queues
+
+| Scenario                | Should You Queue? |
+| ----------------------- | ----------------- |
+| Sending emails          | ✅ Yes             |
+| Processing file uploads | ✅ Yes             |
+| Payment verification    | ⚠️ Depends        |
+| Rendering a simple view | ❌ No              |
+| External API sync       | ✅ Yes             |
+
+---
+
+# Development vs Production
+
+| Environment | Recommended Driver             |
+| ----------- | ------------------------------ |
+| Local       | `sync` (optional)              |
+| Staging     | `database`                     |
+| Production  | `database` + monitored workers |
+
+---
+
+# Summary
+
+The Strux Queue System provides:
+
+* Database-backed job storage
+* Automatic retry handling
+* Atomic locking
+* Safe concurrency
+* Failed job tracking
+* Event-driven integration
+* Manual job dispatching
+* Horizontal scalability
+
+It is designed to keep your application responsive while handling background processing reliably and safely.

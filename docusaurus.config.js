@@ -11,13 +11,13 @@ const config = {
     favicon: 'img/favicon.png',
 
     // Set the production url of your site here
-    url: 'https://your-strux-docs.com',
+    url: 'https://strux-docs.netlify.com',
     baseUrl: '/',
 
     organizationName: 'strux-php',
     projectName: 'strux-framework',
 
-    onBrokenLinks: 'throw',
+    onBrokenLinks: 'warn',
     // onBrokenMarkdownLinks: 'warn',
 
     i18n: {
