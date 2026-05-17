@@ -1,196 +1,1996 @@
----
-title: Forms
-sidebar_position: 4
----
-
 # Forms
 
-The Strux Framework provides a **robust, object-oriented form system** for building forms and validating data.
-
-:::info
-Strux Forms abstract away HTML rendering, data binding, and validation logic into **reusable PHP classes**, keeping your controllers and views clean.
-:::
+The forms system provides a structured, attribute-driven way to build, validate, and render HTML forms. It follows a **declarative pattern**: you define what fields you want using PHP attributes, and the framework handles the rest — rendering HTML, binding request data, validating input, and surfacing errors.
 
 ---
 
-## Overview
+## Architecture Overview
 
-With Strux Forms, you can:
+The form system has three layers:
 
-- Define form fields using **PHP 8 attributes**
-- Apply validation rules declaratively
-- Bind request or model data automatically
-- Render fields, labels, and errors consistently
-- Reuse the same form for **create** and **edit** flows
+1. **Declaration** — You define a form class with typed properties annotated with field attributes (e.g. `#[StringField]`, `#[EmailField]`).
+2. **Binding & Validation** — The form binds to a data source (HTTP request, array, or model object), validates the data against rules, and populates field values.
+3. **Rendering** — In your template, you render the form's fields as HTML using methods like `->input()`, `->label()`, and `->error()`.
+
+```
+                   ┌─────────────────┐
+                   │   ProductForm   │
+                   │  (your class)   │
+                   └────────┬────────┘
+                            │ extends
+                   ┌────────▼────────┐
+                   │      Form       │
+                   │  (abstract base)│
+                   └────────┬────────┘
+                            │ uses
+             ┌──────────────┼──────────────┐
+             │              │              │
+      ┌──────▼──────┐ ┌────▼─────┐ ┌──────▼──────┐
+      │ parseAttrs  │ │  bind()  │ │  isValid()  │
+      │ → discover  │ │ → import │ │ → validate  │
+      │   fields    │ │   data   │ │   fields    │
+      └─────────────┘ └──────────┘ └─────────────┘
+```
 
 ---
 
 ## Creating a Form
 
-To create a form, extend the base `Form` class.
-
-:::tip Recommended
-Defining fields using **PHP attributes** keeps your form declarative and easy to maintain.
-:::
-
-### Example: `RegistrationForm`
+Every form class must extend `Form` (which implements `FormInterface`). Each field is a **protected typed property** annotated with a field attribute:
 
 ```php
-namespace App\Http\Form;
-
 use Strux\Component\Form\Form;
 use Strux\Component\Form\Attributes\StringField;
-use Strux\Component\Form\Attributes\PasswordField;
-use Strux\Component\Form\Attributes\SelectField;
-use Strux\Component\Form\Attributes\ButtonField;
+use Strux\Component\Form\Attributes\EmailField;
+use Strux\Component\Form\Attributes\TextAreaField;
+use Strux\Component\Form\Attributes\SubmitField;
 
-class RegistrationForm extends Form
+class ContactForm extends Form
 {
-    #[StringField(label: 'Full Name', rules: ['required', 'minlength:3'])]
+    #[StringField(label: 'Your Name', rules: ['required', 'minLength:3'])]
     protected string $name;
 
-    #[StringField(label: 'Email Address', rules: ['required', 'email'])]
+    #[EmailField(label: 'Email Address', rules: ['required', 'email'])]
     protected string $email;
 
-    #[PasswordField(label: 'Password', rules: ['required', 'minlength:8'])]
-    protected string $password;
+    #[TextAreaField(label: 'Message', rules: ['required', 'minLength:10'])]
+    protected string $message;
 
-    #[SelectField(
-        label: 'Role',
-        options: ['user' => 'User', 'admin' => 'Admin'],
-        rules: ['required']
-    )]
-    protected string $role = 'user';
-
-    #[ButtonField(label: 'Register', attributes: ['class' => 'btn btn-primary'])]
+    #[SubmitField(label: 'Send Message')]
     protected string $submit;
 }
-````
+```
 
----
+### The `build()` Method
 
-## Defining Fields
-
-Strux supports **two ways** to define form fields.
-
----
-
-### 1️⃣ PHP Attributes (Recommended)
-
-Attributes keep your form definition close to your domain logic.
-
-| Attribute       | Description    | Example                          |
-| --------------- | -------------- | -------------------------------- |
-| `StringField`   | Text input     | `#[StringField(label: 'Name')]`  |
-| `PasswordField` | Password input | `#[PasswordField]`               |
-| `SelectField`   | Dropdown menu  | `#[SelectField(options: [...])]` |
-| `ButtonField`   | Submit button  | `#[ButtonField(label: 'Save')]`  |
-
----
-
-### 2️⃣ The `build()` Method
-
-Use the `build()` method for **dynamic or conditional fields** that attributes cannot express.
+Some fields cannot be declared purely as attributes because they need dynamic configuration (e.g. options loaded from the database). Use the `build()` method for these:
 
 ```php
-public function build(): void
+use Strux\Component\Form\Attributes\SelectField;
+use Strux\Component\Form\Attributes\ListField;
+
+class ProductForm extends Form
 {
-    $this->add('bio', 'textarea', [
-        'label' => 'Biography',
-        'rules' => ['required'],
-        'attributes' => ['rows' => 5]
+    #[SelectField(label: 'Brand', options: [])]   // empty — populated in build()
+    protected string $brandId;
+
+    public function build(): void
+    {
+        $brands = Brand::query()->orderBy('name')->get();
+        $options = ['' => 'No Brand'];
+        foreach ($brands as $b) {
+            $options[(string) $b->brandId] = $b->name;
+        }
+        $this->field('brandId')->setOptions($options);
+    }
+}
+```
+
+`build()` is called automatically during construction, after the attributes are parsed and before data binding.
+
+---
+
+## Field Types Reference
+
+Every field attribute maps to an HTML input type and optionally applies coercion (automatic type casting of the submitted value).
+
+### Text & String Inputs
+
+| Attribute | HTML `<input type>` | Coercion | Description |
+|---|---|---|---|
+| `StringField` | `text` | — | Single-line text input |
+| `TextAreaField` | `<textarea>` | — | Multi-line text input |
+| `EmailField` | `email` | — | Email input (triggers email keyboard on mobile) |
+| `PasswordField` | `password` | — | Password input (value NOT retained on form errors) |
+| `HiddenField` | `hidden` | — | Hidden field, no label |
+| `SearchField` | `search` | — | Search input with clear button |
+| `URLField` | `url` | — | URL input (triggers URL keyboard) |
+| `TelField` | `tel` | — | Telephone input (triggers dialpad) |
+
+```php
+#[StringField(label: 'Full Name', rules: ['required'])]
+protected string $name;
+
+#[TextAreaField(label: 'Bio', attributes: ['rows' => 5, 'placeholder' => 'Tell us about yourself...'])]
+protected string $bio;
+
+#[EmailField(label: 'Email', rules: ['required', 'email'])]
+protected string $email;
+
+#[PasswordField(label: 'Password', rules: ['required', 'minLength:8'])]
+protected string $password;
+
+#[HiddenField()]
+protected string $token;
+
+#[SearchField(label: 'Search')]
+protected string $query;
+
+#[URLField(label: 'Website')]
+protected string $website;
+
+#[TelField(label: 'Phone')]
+protected string $phone;
+```
+
+### Numeric Inputs
+
+| Attribute | HTML `<input type>` | Coercion | HTML attributes |
+|---|---|---|---|
+| `IntegerField` | `number` | `int` | `step="1"`, `inputmode="numeric"` |
+| `DecimalField` | `text` | `float` | `step="0.01"`, `inputmode="decimal"` |
+| `FloatField` | `number` | `float` | `step="any"`, `inputmode="decimal"` |
+
+```php
+#[IntegerField(label: 'Quantity', rules: ['required', 'integer', 'min:1', 'max:100'])]
+protected string $quantity;
+
+#[DecimalField(label: 'Price', rules: ['required', 'numeric'])]
+protected string $price;
+
+#[FloatField(label: 'Rating')]
+protected string $rating;
+```
+
+**Important:** `DecimalField` renders as `type="text"` (not `type="number"`) because `type="number"` with decimal step can be unpredictable across browsers. The field is functionally numeric via the `numeric` validation rule and coerced to `float` on the server side.
+
+### Boolean Inputs
+
+| Attribute | HTML | Coercion | Behavior |
+|---|---|---|---|
+| `BooleanField` | `<input type="hidden">` + `<input type="checkbox">` | `bool` | Submits `0` when unchecked, `1` when checked |
+
+```php
+#[BooleanField(label: 'Subscribe to newsletter')]
+protected string $subscribe;
+```
+
+The dual-input trick (hidden + checkbox) ensures a value is always submitted — `0` when unchecked, `1` when checked. Without the hidden input, unchecked checkboxes send nothing at all.
+
+**How checked is determined:**
+```php
+$checked = $value === true || $value === 1 || $value === '1' || $value === 'on';
+```
+
+### Select & Choice Inputs
+
+| Attribute | HTML | Coercion | Description |
+|---|---|---|---|
+| `SelectField` | `<select>` | — | Single-select dropdown |
+| `SelectMultipleField` | `<select multiple>` | `array` | Multi-select list |
+| `RadioField` | `<input type="radio">` — multiple | — | Radio button group |
+| `ListField` | Multiple `<input type="checkbox">` | `array` | Checkbox list |
+
+```php
+#[SelectField(label: 'Country', options: [
+    '' => 'Select...',
+    'za' => 'South Africa',
+    'ng' => 'Nigeria',
+    'ke' => 'Kenya',
+])]
+protected string $country;
+
+#[SelectMultipleField(label: 'Permissions', options: [
+    'read' => 'Read',
+    'write' => 'Write',
+    'delete' => 'Delete',
+])]
+protected string $permissions;
+
+#[RadioField(label: 'Gender', options: [
+    'male' => 'Male',
+    'female' => 'Female',
+])]
+protected string $gender;
+```
+
+#### `ListField` — Checkbox List (sub-field)
+
+`ListField` renders as a list of checkboxes. It accepts a `fieldType` parameter that specifies which field attribute the individual checkboxes should behave like (defaults to `BooleanField`):
+
+```php
+use Strux\Component\Form\Attributes\ListField;
+use Strux\Component\Form\Attributes\BooleanField;
+
+#[ListField(
+    label: 'Categories',
+    options: ['1' => 'Electronics', '2' => 'Clothing', '3' => 'Books'],
+    fieldType: BooleanField::class,
+    multiple: true,
+)]
+protected string $categories;
+```
+
+The `toFieldConfig()` method on `ListField` passes `fieldType` and `multiple` to the `Field` object, which uses them in `renderList()`:
+
+```php
+public function toFieldConfig(): array
+{
+    return array_merge(parent::toFieldConfig(), [
+        'fieldType' => $this->fieldType,
+        'multiple' => $this->multiple,
     ]);
 }
 ```
+
+### Date & Time Inputs
+
+| Attribute | HTML `<input type>` | Coercion | Notes |
+|---|---|---|---|
+| `DateField` | `date` | — | Browser-native date picker |
+| `TimeField` | `time` | — | Browser-native time picker (HH:MM format) |
+| `DateTimeField` | `datetime` | — | Less common, use `DateTimeLocalField` instead |
+| `DateTimeLocalField` | `datetime-local` | — | Browser-native datetime picker |
+
+```php
+#[DateField(label: 'Start Date')]
+protected string $startDate;
+
+#[TimeField(label: 'Start Time')]
+protected string $startTime;
+
+#[DateTimeLocalField(label: 'Sale Start')]
+protected string $saleStartAt;
+
+#[DateTimeLocalField(label: 'Sale End')]
+protected string $saleEndAt;
+```
+
+**Binding from DateTime objects:** When a form is bound to a model object that has `DateTime` properties (like `saleStartAt`), the form system automatically converts them to the browser-compatible format `Y-m-d\TH:i:s` (e.g. `2026-05-15T19:52:00`).
+
+### Range Inputs
+
+| Attribute | HTML `<input type>` | Coercion | HTML attributes |
+|---|---|---|---|
+| `IntegerRangeField` | `range` | `int` | `step="1"` |
+| `DecimalRangeField` | `range` | `float` | `step="any"` |
+
+```php
+#[IntegerRangeField(label: 'Volume', attributes: ['min' => 0, 'max' => 100])]
+protected string $volume;
+
+#[DecimalRangeField(label: 'Opacity', attributes: ['min' => 0, 'max' => 1])]
+protected string $opacity;
+```
+
+### File Inputs
+
+| Attribute | HTML | Coercion | Notes |
+|---|---|---|---|
+| `FileField` | `<input type="file">` | — | Single file upload |
+| `MultipleFileField` | `<input type="file" multiple>` | `array` | Multiple file upload |
+
+```php
+#[FileField(label: 'Avatar')]
+protected string $avatar;
+
+#[MultipleFileField(label: 'Gallery Images')]
+protected string $gallery;
+```
+
+**Note:** File upload handling (multipart form data, file processing) is done separately — the form system only renders the input and captures the filename/value from the request.
+
+### Submit Button
+
+| Attribute | HTML | Notes |
+|---|---|---|
+| `SubmitField` | `<input type="submit">` | Default class `btn btn-primary` |
+| `ButtonField` | `<button type="submit">` | Default class `btn btn-primary` |
+
+```php
+#[SubmitField(label: 'Save Product')]
+protected string $submit;
+```
+
+`SubmitField` renders as `<input type="submit">`, while `ButtonField` renders as `<button type="submit">`. Both serve the same purpose but use different HTML elements. Use `SubmitField` for simple forms and `ButtonField` when you need to nest content inside the button (icons, etc.).
+
+---
+
+## Field Configuration Reference
+
+Every field attribute accepts a common set of parameters via the parent `FieldAttribute` class:
+
+```php
+public function __construct(
+    public string  $type = 'text',       // HTML input type
+    public ?string $label = null,        // Display label (null = no label)
+    public array   $rules = [],          // Validation rules
+    public array   $attributes = [],     // Custom HTML attributes
+    public array   $options = [],        // For select/radio/checkbox options
+    public mixed   $default = null,      // Default value
+    public ?string $coerce = null        // Type coercion (int, float, bool, string, array)
+)
+```
+
+### The `fromConfig()` Method
+
+On the attribute class:
+
+```php
+public static function fromConfig(array $config): static
+{
+    $ref = new ReflectionClass(static::class);
+    $ctor = $ref->getConstructor();
+    $params = $ctor ? $ctor->getParameters() : [];
+
+    $args = [];
+    foreach ($params as $param) {
+        $name = $param->getName();
+        if (array_key_exists($name, $config)) {
+            $args[$name] = $config[$name];
+        } elseif ($param->isDefaultValueAvailable()) {
+            $args[$name] = $param->getDefaultValue();
+        }
+    }
+
+    return new static(...$args);
+}
+```
+
+This is used during `Form::add()` when a field type is a subclass of `FieldAttribute`. It allows creating attribute instances from a plain config array, enabling the dual declaration path (attribute vs `build()` method).
+
+---
+
+## Form Binding (Data Flow)
+
+Binding is the process of populating form fields with data. The form's `bind()` method accepts three types of data:
+
+### Binding an HTTP Request
+
+```php
+// In your controller:
+$form = new ContactForm();
+
+if ($request->is('POST')) {
+    $form->bind($request);  // Extracts all POST data via $request->all()
+
+    if ($form->isValid()) {
+        // Process the form...
+        $name = $form->get('name');
+        $email = $form->get('email');
+    }
+}
+```
+
+The `bind()` method detects the type of data automatically:
+
+```php
+public function bind(mixed $data): self
+{
+    $inputData = [];
+
+    if ($data instanceof Request) {
+        $inputData = $data->all();          // HTTP request → all input
+    } elseif (is_array($data)) {
+        $inputData = $data;                 // Plain array → direct use
+    } elseif (is_object($data)) {
+        // Model/entity → extract matching properties
+        foreach ($this->fields as $name => $field) {
+            if (property_exists($data, $name)) {
+                $value = $data->$name;
+                if (is_scalar($value)) {
+                    $inputData[$name] = (string) $value;
+                } elseif (is_array($value)) {
+                    $inputData[$name] = $value;
+                } elseif ($value instanceof \DateTime) {
+                    $inputData[$name] = $value->format('Y-m-d\TH:i:s');
+                }
+            } elseif (method_exists($data, 'get' . ucfirst($name))) {
+                $method = 'get' . ucfirst($name);
+                $value = $data->$method();
+                if (is_scalar($value)) {
+                    $inputData[$name] = (string) $value;
+                } elseif (is_array($value)) {
+                    $inputData[$name] = $value;
+                }
+            } elseif (method_exists($data, 'toArray')) {
+                $arrayData = $data->toArray();
+                if (isset($arrayData[$name])) {
+                    $inputData[$name] = (string) $arrayData[$name];
+                }
+            }
+        }
+    }
+    // ... then sets field values and properties
+}
+```
+
+### Binding an Entity/Model
+
+```php
+$product = $this->productRepository->findById($id);
+$form = new ProductForm($product);  // Auto-binds via constructor
+```
+
+When the form receives an object, it looks for each field name as:
+1. **A public property** on the object (e.g. `$product->title`)
+2. **A getter method** (e.g. `$product->getTitle()`)
+3. **A `toArray()` fallback** on the object
+
+### Auto-Binding via Constructor
+
+If you pass data to the constructor, `bind()` is called automatically:
+
+```php
+public function __construct(mixed $data = null, ?ValidatorInterface $validator = null)
+{
+    // 1. Resolve validator
+    // 2. Parse attributes + call build()
+    // 3. Auto-bind:
+    if ($data !== null) {
+        $this->bind($data);
+    }
+}
+```
+
+### Smart Type Handling
+
+When binding to an object, the form system handles different types:
+
+| Object Property Type | Converted To | Example |
+|---|---|---|
+| `string`, `int`, `float`, `bool` | `(string) $value` | `"Hello"` |
+| `array` | Kept as array | `['red', 'blue']` |
+| `DateTime` | `$value->format('Y-m-d\TH:i:s')` | `"2026-05-15T19:52:00"` |
+| `null` | Not included (field stays at default) | — |
+
+### Re-binding After Validation Failure
+
+```php
+$form->bind($request);  // Bind user input
+
+if (!$form->isValid()) {
+    // Form is re-rendered with submitted values + error messages
+    return $this->view('contact', ['form' => $form]);
+}
+```
+
+After `bind()`, the form's field values contain the submitted data, so re-rendering the template automatically shows what the user typed.
+
+---
+
+## Accessing Form Data
+
+### `get()`
+
+Get a single field's value:
+
+```php
+$title = $form->get('title');          // Returns the value or null
+$title = $form->get('title', 'Untitled');  // With default fallback
+```
+
+### `getData()`
+
+Get all field values as an associative array:
+
+```php
+$data = $form->getData();
+// ['title' => 'My Product', 'price' => '19.99', ...]
+```
+
+### `field()->getValue()`
+
+Get the raw value from the underlying `Field` object (bypasses any form-level processing):
+
+```php
+$value = $form->field('categories')->getValue();
+```
+
+### Magic Property Access
+
+Form fields are accessible as magic properties via `__get()`:
+
+```php
+<?= $form->email->label() ?>    <!-- Same as $form->field('email')->label() -->
+<?= $form->email->input() ?>    <!-- Same as $form->field('email')->input() -->
+<?= $form->email->error() ?>    <!-- Same as $form->field('email')->error() -->
+```
+
+This works because `Form::__get()` checks `$this->fields[$name]` before falling back to class properties:
+
+```php
+public function __get(string $name)
+{
+    if (isset($this->fields[$name])) {
+        return $this->fields[$name];
+    }
+    if (property_exists($this, $name)) {
+        return $this->$name;
+    }
+    throw new \InvalidArgumentException("Field or property '$name' does not exist.");
+}
+```
+
+Both forms work identically:
+
+```php
+// Long form (explicit):
+<?= $form->field('email')->label() ?>
+<?= $form->field('email')->input(['class' => 'form-input']) ?>
+<?= $form->field('email')->error('text-red-500') ?>
+
+// Magic property (shorthand):
+<?= $form->email->label() ?>
+<?= $form->email->input(['class' => 'form-input']) ?>
+<?= $form->email->error('text-red-500') ?>
+```
+
+**Important:** The magic property access works even when the form property is `protected`. `__get()` is triggered for inaccessible properties, so `$form->email` returns the `Field` object regardless of the `$email` property's visibility.
+
+---
+
+## Validation
+
+### Defining Rules
+
+Rules are defined as strings in the field attribute's `rules` parameter:
+
+```php
+#[StringField(label: 'Username', rules: ['required', 'minLength:3', 'maxLength:50', 'alpha'])]
+protected string $username;
+```
+
+### Rule Syntax
+
+Each rule string is parsed using this pattern:
+
+```php
+// Simple rule (no parameters):
+'required'
+
+// Rule with parameters (colon-separated value, comma-separated for multiple params):
+'minLength:3'
+'maxLength:100'
+'in:admin,user,editor'
+
+// Rule with custom error message (message after space):
+'required:Please fill this field'
+'minLength:3:Must be at least 3 chars'
+```
+
+The rule resolution in `Validator::resolveRule()`:
+
+```php
+private function resolveRule(string $ruleString): RulesInterface
+{
+    $params = [];
+    if (str_contains($ruleString, ':')) {
+        [$ruleName, $paramStr] = explode(':', $ruleString, 2);
+        $params = explode(',', $paramStr);
+    } else {
+        $ruleName = $ruleString;
+    }
+
+    $className = 'Strux\\Component\\Validation\\Rules\\' . ucfirst(strtolower($ruleName));
+
+    if (class_exists($className)) {
+        return new $className(...$params);
+    }
+
+    throw new \RuntimeException("Validation rule class '{$className}' not found.");
+}
+```
+
+**Important note on custom messages:** Rules accept custom messages via their constructor. When using string syntax, the first parameter after the colon is the rule value (not the message), and the message cannot currently be customized via string syntax. Custom messages require using the `Callback` rule or creating a custom rule class.
+
+### Available Rules (21 rules)
+
+All rules implement `RulesInterface`:
+
+```php
+interface RulesInterface
+{
+    public function validate($value, mixed $data = null): ?string;
+    // Returns null if valid, error string if invalid
+}
+```
+
+#### Presence & Structure
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `required` | — | Value is not empty (`!empty($value)`) | `rules: ['required']` |
+| `alpha` | — | Contains only alphabetic characters (`ctype_alpha`) | `rules: ['alpha']` |
+| `alphanumeric` | — | Contains only letters and numbers (`ctype_alnum`) | `rules: ['alphanumeric']` |
+
+#### Length
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `minLength` | `N` (int) | Length >= N (`strlen`) | `rules: ['minLength:3']` |
+| `maxLength` | `N` (int) | Length &lt;= N (`strlen`) | `rules: ['maxLength:100']` |
+
+#### Numeric
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `numeric` | — | Is numeric (`is_numeric`) | `rules: ['numeric']` |
+| `integer` | — | Is integer (`filter_var FILTER_VALIDATE_INT`) | `rules: ['integer']` |
+| `min` | `N` (float) | Value >= N | `rules: ['min:1']` |
+| `max` | `N` (float) | Value &lt;= N | `rules: ['max:1000']` |
+
+#### Format
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `email` | — | Valid email (`filter_var FILTER_VALIDATE_EMAIL`) | `rules: ['email']` |
+| `url` | — | Valid URL (`filter_var FILTER_VALIDATE_URL`) | `rules: ['url']` |
+| `date` | — | Valid date string (`strtotime !== false`) | `rules: ['date']` |
+| `time` | — | HH:MM format (`preg_match /^([01]\d\|2[0-3]):([0-5]\d)$/`) | `rules: ['time']` |
+| `regex` | Pattern | Matches pattern (`preg_match`) | `rules: ['regex:/^[A-Z]+$/']` |
+
+#### Comparison
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `equal` | `field_name` | Value equals another field's value | `rules: ['equal:password_confirmation']` |
+| `same` | `field_name` | Value is identical to another field's value | `rules: ['same:emailConfirmation']` |
+| `in` | `val1,val2,...` | Value is in allowed list | `rules: ['in:active,inactive,draft']` |
+| `notin` | `val1,val2,...` | Value is NOT in disallowed list | `rules: ['notin:admin,superadmin']` |
+
+**Difference between `equal` and `same`:**
+- `equal`: Returns a default message `"Field do not match {otherField}"` when values differ
+- `same`: Returns a custom message `"The field must match {otherField}"` when values differ
+- Both check `$value !== $data[$this->otherField]`
+- Both require the other field to exist in the data array
+
+#### Security
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `passwordStrength` | — | At least 1 uppercase, 1 lowercase, 1 digit, 1 special char, 8+ chars | `rules: ['passwordStrength']` |
+
+#### Custom
+
+| Rule | Parameters | Validates | Example |
+|---|---|---|---|
+| `callback` | Closure | Custom validation logic | See example below |
+
+#### Callback Rule (Custom Validation)
+
+The callback rule lets you write inline validation logic:
+
+```php
+use Strux\Component\Validation\Rules\Callback;
+
+#[StringField(label: 'Coupon Code', rules: [
+    'required',
+    new Callback(function ($value, $data) {
+        // Return true = valid
+        // Return string = error message
+        if (!str_starts_with($value, 'SAVE')) {
+            return 'Coupon code must start with "SAVE".';
+        }
+        return true;
+    }),
+])]
+protected string $couponCode;
+```
+
+The `Callback` rule class:
+
+```php
+class Callback implements RulesInterface
+{
+    public function __construct(callable $callback, ?string $message = null)
+    {
+        $this->callback = $callback instanceof Closure ? $callback : $callback(...);
+        $this->message = $message ?? 'Custom validation failed.';
+    }
+
+    public function validate($value, $data = null): ?string
+    {
+        $result = ($this->callback)($value, $data);
+
+        if ($result === true) {
+            return null;
+        }
+
+        return is_string($result) ? $result : $this->message;
+    }
+}
+```
+
+### Validation Lifecycle
+
+```
+$form = new ContactForm();          // Fields created, no data
+$form->bind($request);              // Data bound, isBound = true
+$form->isValid()                    // Triggers validation
+    ├── Gathers field values and rules
+    ├── Passes to $validator->validate($data, $rules)
+    │       └── For each field:
+    │           ├── resolveRule('required') → new Required()
+    │           ├── resolveRule('email') → new Email()
+    │           ├── $rule->validate($value, $data) → null or error string
+    │           └── Stores errors by field name
+    ├── If invalid: sets errors on corresponding Field objects
+    └── Returns true/false
+```
+
+### Error Messages
+
+The `isValid()` method populates errors on individual fields:
+
+```php
+public function isValid(): bool
+{
+    if (!$this->isBound) return false;
+
+    $data = [];
+    $rules = [];
+
+    foreach ($this->fields as $name => $field) {
+        $data[$name] = $field->getValue();
+        $fieldRules = $field->getRules();
+        if (!empty($fieldRules)) {
+            $rules[$name] = $fieldRules;
+        }
+    }
+
+    if ($this->validator->validate($data, $rules)) {
+        return true;
+    }
+
+    $errors = $this->validator->getErrors();
+    foreach ($errors as $field => $messages) {
+        if (isset($this->fields[$field])) {
+            $this->fields[$field]->setErrors((array) $messages);
+        }
+    }
+
+    return false;
+}
+```
+
+Individual validation rules return `null` (valid) or `string` (error message). The first rule failure for each field short-circuits further validation (the `break` in `validateField()`).
 
 ---
 
 ## Rendering Forms
 
-Forms are rendered in your views using **field helpers** or **magic properties**.
+### In the Controller
 
----
-
-### Using Field Helpers (`field()`)
-
-Recommended when form properties are protected.
+Pass the form to your view:
 
 ```php
-<form method="POST">
-    <div class="mb-3">
-        <?= $form->field('name')->label(['class' => 'form-label']) ?>
+public function create(): Response
+{
+    $form = new ContactForm();
+    return $this->view('contact', ['form' => $form]);
+}
+```
+
+### In the Template (Plates)
+
+```php
+<form method="POST" action="/contact">
+    <div>
+        <?= $form->field('name')->label() ?>
         <?= $form->field('name')->input(['class' => 'form-control']) ?>
-        <?= $form->field('name')->error('text-danger') ?>
+        <?= $form->field('name')->error('text-red-500 text-sm') ?>
     </div>
 
-    <?= $form->field('submit')->input() ?>
+    <div>
+        <?= $form->email->label() ?>
+        <?= $form->email->input(['class' => 'form-control']) ?>
+        <?= $form->email->error('text-red-500 text-sm') ?>
+    </div>
+
+    <div>
+        <?= $form->field('message')->label() ?>
+        <?= $form->field('message')->input(['class' => 'form-control', 'rows' => 5]) ?>
+        <?= $form->field('message')->error('text-red-500 text-sm') ?>
+    </div>
+
+    <?= $form->field('submit')->input(['class' => 'btn btn-primary']) ?>
 </form>
 ```
 
----
+### Rendering Methods on `Field`
 
-### Using Magic Properties
+#### `label(array $attributes = []): string`
 
-Works when properties are protected (via `__get`) or public.
+Renders the `<label>` element. The `for` attribute is automatically set to the field name. No label is rendered for `submit`, `button`, `reset`, or `hidden` field types.
 
 ```php
-<?= $form->email->label() ?>
-<?= $form->email->input() ?>
-<?= $form->email->error() ?>
+<?= $form->field('email')->label() ?>
+<!-- <label for="email">Email Address</label> -->
+
+<?= $form->field('email')->label(['class' => 'font-bold']) ?>
+<!-- <label for="email" class="font-bold">Email Address</label> -->
+```
+
+#### `input(array $attributes = []): string`
+
+Renders the full HTML input, select, textarea, or checkbox group. The attributes passed here **merge with** the attributes defined in the field attribute declaration (with passed attributes taking priority).
+
+```php
+<?= $form->field('email')->input() ?>
+<!-- <input type="email" name="email" value=""> -->
+
+<?= $form->field('email')->input(['class' => 'form-input', 'placeholder' => 'you@example.com']) ?>
+<!-- <input type="email" name="email" value="" class="form-input" placeholder="you@example.com"> -->
+```
+
+If the field has validation errors, the `is-invalid` CSS class is appended automatically:
+
+```php
+// If field has errors:
+<?= $form->field('email')->input(['class' => 'form-input']) ?>
+<!-- <input type="email" ... class="form-input is-invalid"> -->
+```
+
+#### `error(string $class = 'invalid-feedback'): string`
+
+Renders the first validation error message inside a `<div>`. Returns empty string if the field has no errors.
+
+```php
+<?= $form->field('email')->error() ?>
+<!-- <div class="invalid-feedback">Please enter a valid email address.</div> -->
+
+<?= $form->field('email')->error('text-red-500 text-xs mt-1') ?>
+<!-- <div class="text-red-500 text-xs mt-1">Please enter a valid email address.</div> -->
+```
+
+### Field Type Rendering Details
+
+Each field type is rendered by a dedicated method on `Field`:
+
+#### Checkbox (`BooleanField`)
+
+Renders a hidden input + checkbox to ensure a `0` value is always submitted:
+
+```php
+// $checked = true
+<input type="hidden" name="subscribe" value="0">
+<input type="checkbox" name="subscribe" value="1" checked>
+
+// $checked = false
+<input type="hidden" name="subscribe" value="0">
+<input type="checkbox" name="subscribe" value="1">
+```
+
+#### Radio (`RadioField`)
+
+Renders multiple `<label><input type="radio"> <span>...</span></label>` elements, each with a unique `id` based on the value:
+
+```php
+<label class="radio-option">
+    <input type="radio" name="gender" value="male" id="gender_male" checked>
+    <span>Male</span>
+</label>
+<label class="radio-option">
+    <input type="radio" name="gender" value="female" id="gender_female">
+    <span>Female</span>
+</label>
+```
+
+#### Select (`SelectField` / `SelectMultipleField`)
+
+Single select:
+```php
+<select name="country">
+    <option value="">Select...</option>
+    <option value="za" selected>South Africa</option>
+    <option value="ng">Nigeria</option>
+</select>
+```
+
+Multiple select (name ends with `[]`):
+```php
+<select name="permissions[]" multiple>
+    <option value="read" selected>Read</option>
+    <option value="write">Write</option>
+</select>
+```
+
+#### Textarea (`TextAreaField`)
+
+```php
+<textarea name="bio" rows="5" class="form-input">Existing value</textarea>
+```
+
+#### Checkbox List (`ListField`)
+
+Renders a hidden input + individual checkboxes:
+
+```php
+<input type="hidden" name="categories[]" value="">
+<label class="checkbox-option">
+    <input type="checkbox" name="categories[]" value="1" checked> <span>Electronics</span>
+</label>
+<label class="checkbox-option">
+    <input type="checkbox" name="categories[]" value="2"> <span>Clothing</span>
+</label>
 ```
 
 ---
 
-## Handling Submissions
+## Rendering a Complete Form with `render()`
 
-In your controller, instantiate the form with the current `Request`.
-Data binding happens automatically.
+The `Form::render()` method generates a complete `<form>` element with all fields, CSRF token, and optional custom layout.
+
+### Basic Usage
 
 ```php
-use App\Http\Form\RegistrationForm;
-use Strux\Component\Http\Response;
+// In your template:
+<?= $form->render() ?>
+```
 
-public function register(Request $request): Response
+Output:
+```html
+<form action="/settings" method="POST">
+    <input type="hidden" name="_csrf_token" value="...">
+    <div class="form-field">
+        <label class="form-label" for="site_name">Site Name</label>
+        <input type="text" id="site_name" name="site_name" class="form-input">
+        <div class="form-error">Error message</div>
+    </div>
+    <div class="form-field">
+        <label class="form-label" for="submit">Save</label>
+        <input type="submit" id="submit" class="btn-form" value="Save Settings">
+    </div>
+</form>
+```
+
+### Custom Form Attributes
+
+Pass HTML attributes to the `<form>` element:
+
+```php
+<?= $form->render(['class' => 'space-y-4', 'id' => 'settings-form']) ?>
+```
+
+Output:
+```html
+<form action="/settings" method="POST" class="space-y-4" id="settings-form">
+    <!-- fields -->
+</form>
+```
+
+### Grid Layout with Form Attributes
+
+Apply a grid class directly to the form element. Each field wrapper becomes a grid cell:
+
+```php
+<?= $form->render(['class' => 'grid grid-cols-1 md:grid-cols-2 gap-6']) ?>
+```
+
+Output:
+```html
+<form class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="form-field">
+        <label>Merchant ID</label>
+        <input>
+    </div>
+    <div class="form-field">
+        <label>Merchant Key</label>
+        <input>
+    </div>
+    <!-- ... -->
+</form>
+```
+
+### Custom Layout Callback
+
+For full control over field rendering, pass a callback as the second argument. The callback receives all fields and the form instance:
+
+```php
+<?= $form->render(['class' => 'grid grid-cols-1 md:grid-cols-2 gap-6'], function($fields, $form) {
+    $html = '';
+    foreach ($fields as $field) {
+        $type = $field->getType();
+        $spanClass = '';
+
+        // Span full-width for textareas, checkboxes, and submit buttons
+        if (in_array($type, ['textarea', 'checkbox', 'submit'])) {
+            $spanClass = 'md:col-span-2';
+        }
+
+        $html .= sprintf('<div class="form-field %s">', $spanClass);
+        $html .= $field->label(['class' => 'form-label']);
+        $html .= $field->input(['class' => 'form-input']);
+        $html .= $field->error('form-error');
+        $html .= '</div>';
+    }
+    return $html;
+}) ?>
+```
+
+**Why use a layout callback?**
+- Control grid spanning per field type
+- Add custom wrappers or icons around specific fields
+- Group related fields together
+- Apply different CSS classes per field
+
+### Manual Field Composition with Icons
+
+For complex layouts (like admin forms with icons), compose fields manually:
+
+```php
+<form action="<?= route('admin.products.create') ?>" method="POST">
+    <?= csrf_token() ?>
+
+    <div>
+        <label class="form-label" for="title">Title</label>
+        <div class="form-input-wrap">
+            <i class="ph ph-text-t form-icon"></i>
+            <?= $form->field('title')->input(['class' => 'form-input pl-11']) ?>
+        </div>
+        <?= $form->field('title')->error('form-error') ?>
+    </div>
+
+    <div>
+        <label class="form-label" for="price">Price</label>
+        <div class="form-input-wrap">
+            <i class="ph ph-currency-dollar form-icon"></i>
+            <?= $form->field('price')->input(['class' => 'form-input pl-11']) ?>
+        </div>
+        <?= $form->field('price')->error('form-error') ?>
+    </div>
+
+    <?= $form->field('submit')->input(['class' => 'btn-primary w-full']) ?>
+</form>
+```
+
+### CSRF Token
+
+The `render()` method automatically includes a CSRF token hidden input right after the opening `<form>` tag. It uses the `csrf_token()` helper function.
+
+---
+
+## CSS Class System
+
+The form system uses named CSS classes defined via Tailwind's `@layer components`. This keeps styling centralized and easily themeable.
+
+### Default Classes
+
+| Class Key | Default Class | Purpose |
+|---|---|---|
+| `label` | `form-label` | Label element styling |
+| `input` | `form-input` | Input/select/textarea styling |
+| `error` | `form-error` | Validation error message styling |
+| `submit` | `btn-form` | Submit button styling |
+| `checkbox` | `form-checkbox` | Checkbox input styling |
+
+### CSS Definitions (`web/assets/css/input.css`)
+
+```css
+@layer components {
+    .form-field {
+        @apply space-y-4;
+    }
+    .form-input-wrap {
+        @apply relative flex items-center;
+    }
+    .form-icon {
+        @apply absolute left-4 text-lg text-espresso/40;
+    }
+    .form-label {
+        @apply block text-sm font-medium text-espresso mb-1.5;
+    }
+    .form-input {
+        @apply w-full bg-ivory border border-mist rounded-xl pl-4 pr-4 py-2.5 text-[14px] text-espresso placeholder-espresso/40 transition-colors focus:outline-none focus:border-terracotta focus:ring-1 focus:ring-terracotta;
+    }
+    .form-input-toggle {
+        @apply absolute right-4 text-lg text-espresso/40 hover:text-espresso transition-colors;
+    }
+    .form-error {
+        @apply text-red-600 text-xs mt-1;
+    }
+    .btn-form {
+        @apply bg-terracotta text-ivory font-semibold py-3 rounded-lg hover:bg-terracotta/90 transition cursor-pointer;
+    }
+    .form-checkbox {
+        @apply rounded border-mist text-terracotta focus:ring-terracotta;
+    }
+}
+```
+
+### Overriding Classes Per Form
+
+Override the `$fieldClasses` array in your form subclass:
+
+```php
+class MyForm extends Form
 {
-    $form = new RegistrationForm($request);
+    protected array $fieldClasses = [
+        'label'    => 'block text-xs font-bold uppercase tracking-wider',
+        'input'    => 'w-full border rounded px-3 py-2',
+        'error'    => 'text-red-500 text-sm',
+        'submit'   => 'bg-blue-600 text-white px-6 py-3 rounded',
+        'checkbox' => 'rounded',
+    ];
 
-    if ($request->getMethod() === 'POST' && $form->isValid()) {
-        $data = $form->getData();
+    // ... fields
+}
+```
 
-        // Persist user...
-        return new Response(200, [], "User {$data['name']} created!");
+### Overriding Per Field
+
+Field-level `attributes: ['class' => '...']` takes priority over `$fieldClasses`:
+
+```php
+#[StringField(label: 'Name', attributes: ['class' => 'custom-input-class'])]
+protected string $name;
+```
+
+---
+
+## Form Configuration Methods
+
+### `setAction()`, `setMethod()`, `setEnctype()`
+
+Configure the form's HTML attributes:
+
+```php
+$form->setAction('/api/products')
+     ->setMethod('POST')
+     ->setEnctype('multipart/form-data');
+```
+
+### `setWrapperClass()`
+
+Override the CSS class applied to each field's wrapper div:
+
+```php
+$form->setWrapperClass('mb-6');
+```
+
+Default is `form-field` (which applies `space-y-4`).
+
+---
+
+## Auto-Generating Forms from Models with `create()`
+
+The `create()` method reflects on a model instance and auto-generates form fields based on property types and names.
+
+### Basic Usage
+
+```php
+$form = new ProductForm();
+$form->create($product, [
+    'action' => route('admin.products.update', $product->id),
+    'method' => 'POST',
+]);
+```
+
+### Type Inference Rules
+
+| PHP Type | Name Pattern | Inferred Field |
+|---|---|---|
+| `string` | `*email*` | `EmailField` |
+| `string` | `*password*` | `PasswordField` |
+| `string` | `*description*`, `*content*`, `*body*` | `TextAreaField` |
+| `string` | `*url*`, `*website*` | `URLField` |
+| `string` | `*phone*`, `*tel*` | `TelField` |
+| `string` | `*search*`, `*query*` | `SearchField` |
+| `string` | default | `StringField` |
+| `int` | — | `IntegerField` |
+| `float` | — | `DecimalField` |
+| `bool` | — | `BooleanField` |
+| `DateTime` | — | `DateTimeLocalField` |
+| `array` | — | `ListField` |
+
+**Skips:** Properties with `#[RelationAttribute]` (HasOne, HasMany, BelongsTo, BelongsToMany).
+
+### Auto-Binding
+
+After generating fields, `create()` automatically binds the model data so the form is pre-populated.
+
+### Adding Fields After `create()`
+
+You can chain `add()` calls after `create()` to add custom fields:
+
+```php
+$form->create($product, ['action' => '/products', 'method' => 'POST'])
+     ->add('notes', TextAreaField::class, ['label' => 'Admin Notes'])
+     ->add('save', SubmitField::class, ['label' => 'Create Product']);
+```
+
+### Options Array
+
+The second parameter accepts form configuration:
+
+```php
+$form->create($product, [
+    'action'      => route('products.store'),
+    'method'      => 'POST',
+    'enctype'     => 'multipart/form-data',
+    'wrapperClass' => 'space-y-4',
+]);
+```
+
+---
+
+## FormFactory
+
+The `FormFactory` is a DI-injectable class for creating forms with options. It's automatically registered in the container and accessible in controllers via `$this->forms`.
+
+### Usage in Controllers
+
+```php
+// Create a form with options
+$form = $this->forms->create(ProductForm::class, $product, [
+    'action' => route('admin.products.update', $product->id),
+    'method' => 'POST',
+    'wrapperClass' => 'space-y-4',
+]);
+
+// Auto-generate from model
+$form = $this->forms->auto($product, [
+    'action' => '/products',
+    'method' => 'POST',
+]);
+```
+
+### Container Access
+
+The factory is accessible via the controller's `__get()` magic method:
+
+```php
+$this->forms  // Returns FormFactory from container
+```
+
+---
+
+## Adding Fields Programmatically
+
+Fields can also be added dynamically in `build()` using `$this->add()`:
+
+```php
+use Strux\Component\Form\Attributes\SelectField;
+
+public function build(): void
+{
+    // Using an attribute class FQCN (preferred):
+    $this->add('role', SelectField::class, [
+        'label' => 'Role',
+        'rules' => ['required'],
+        'options' => [
+            'admin' => 'Administrator',
+            'editor' => 'Editor',
+            'viewer' => 'Viewer',
+        ],
+    ]);
+
+    // Using a raw HTML type string:
+    $this->add('color', 'color', [
+        'label' => 'Pick a color',
+    ]);
+}
+```
+
+The `add()` method is **chainable**:
+
+```php
+$this->add('task', StringField::class)
+     ->add('dueDate', DateField::class)
+     ->add('save', SubmitField::class, ['label' => 'Create']);
+```
+
+The `add()` method resolves the field type:
+
+```php
+protected function add(string $name, string $type, array $config = []): self
+{
+    $fieldType = $type;
+    $fieldConfig = $config;
+
+    if (is_subclass_of($type, FieldAttribute::class)) {
+        // Create attribute instance from config, extract type and config
+        $attribute = $type::fromConfig($config);
+        $fieldType = $attribute->type;
+        $fieldConfig = array_merge($attribute->toFieldConfig(), $config);
     }
 
-    return $this->view('auth/register', ['form' => $form]);
+    $this->fields[$name] = new Field($name, $fieldType, $fieldConfig);
+    return $this;
 }
 ```
 
 ---
 
-## Model Binding
+## The `Field` Object API
 
-Forms can be populated from a **model**, **entity**, or **array** — ideal for edit screens.
+| Method | Returns | Description |
+|---|---|---|
+| `getName()` | `string` | The field name |
+| `getValue()` | `mixed` | The current value |
+| `setValue($value)` | `void` | Set the value (with optional coercion) |
+| `getRules()` | `array` | The validation rules |
+| `setErrors(array)` | `void` | Set error messages |
+| `getErrors()` | `array` | Get error messages |
+| `hasError()` | `bool` | Whether the field has errors |
+| `getOptions()` | `array` | The available options (select, radio, list) |
+| `setOptions(array)` | `self` | Set options dynamically |
+| `setCoerce(?string)` | `self` | Set type coercion |
+| `getCoerce()` | `?string` | Get coercion type |
+| `getAttributes()` | `array` | Get the field's HTML attributes |
+| `getType()` | `string` | Get the HTML input type |
+| `label(array)` | `string` | Render `<label>` HTML |
+| `input(array)` | `string` | Render input HTML |
+| `error(string)` | `string` | Render error HTML |
+
+### `Field` Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `$name` | `string` | Field name |
+| `$type` | `string` | HTML input type (text, email, select, etc.) |
+| `$label` | `?string` | Label text |
+| `$value` | `mixed` | Current value |
+| `$attributes` | `array` | Base HTML attributes |
+| `$rules` | `array` | Validation rules |
+| `$errors` | `array` | Validation error messages |
+| `$options` | `array` | Choice options (key → label) |
+| `$coerce` | `?string` | Coercion type (int, float, bool, string, array) |
+| `$fieldType` | `?string` | Sub-field type class (for ListField) |
+| `$multiple` | `bool` | Whether the field accepts multiple values |
+
+---
+
+## The `FieldAttribute` Base Class
+
+All field attributes extend `FieldAttribute`:
 
 ```php
-public function edit(int $id): Response
+#[Attribute(Attribute::TARGET_PROPERTY)]
+class FieldAttribute
 {
-    $user = User::find($id);
+    public function __construct(
+        public string  $type = 'text',
+        public ?string $label = null,
+        public array   $rules = [],
+        public array   $attributes = [],
+        public array   $options = [],
+        public mixed   $default = null,
+        public ?string $coerce = null
+    )
+    {}
+}
+```
 
-    // Automatically maps model properties to form fields
-    $form = new RegistrationForm($user);
+Key methods:
 
-    return $this->view('auth/edit', ['form' => $form]);
+- `fromConfig(array $config): static` — Creates an attribute instance from a config array (used by `Form::add()`).
+- `toFieldConfig(): array` — Extracts field config (label, rules, attributes, options, coerce) from the attribute for the `Field` object.
+
+### Creating a Custom Field Attribute
+
+```php
+use Attribute;
+use Strux\Component\Form\Attributes\FieldAttribute;
+
+#[Attribute(Attribute::TARGET_PROPERTY)]
+class ColorField extends FieldAttribute
+{
+    public function __construct(
+        ?string $label = null,
+        array   $rules = [],
+        array   $attributes = [],
+        mixed   $default = '#000000'
+    )
+    {
+        parent::__construct(
+            type: 'color',
+            label: $label,
+            rules: $rules,
+            attributes: $attributes,
+            default: $default
+        );
+    }
+}
+```
+
+Usage:
+
+```php
+#[ColorField(label: 'Background Color')]
+protected string $bgColor;
+```
+
+---
+
+## How `parseAttributes()` Works
+
+This is the core engine that discovers fields from your form's typed properties:
+
+```php
+protected function parseAttributes(): void
+{
+    $reflection = new ReflectionClass($this);
+    $properties = $reflection->getProperties(
+        ReflectionProperty::IS_PUBLIC | ReflectionProperty::IS_PROTECTED
+    );
+
+    foreach ($properties as $property) {
+        $attributes = $property->getAttributes(
+            FieldAttribute::class,
+            \ReflectionAttribute::IS_INSTANCEOF
+        );
+
+        foreach ($attributes as $attribute) {
+            $instance = $attribute->newInstance();
+
+            $defaultValue = $instance->default;
+            if ($property->isInitialized($this) && $property->getValue($this) !== null) {
+                $defaultValue = $property->getValue($this);
+            }
+
+            $this->add($property->getName(), $instance->type, [
+                'label' => $instance->label,
+                'rules' => $instance->rules,
+                'attributes' => $instance->attributes,
+                'options' => $instance->options,
+                'value' => $defaultValue,
+                'coerce' => $instance->coerce,
+            ]);
+
+            if ($defaultValue !== null && !$property->isReadOnly()) {
+                $property->setAccessible(true);
+                $property->setValue($this, $defaultValue);
+            }
+        }
+    }
+}
+```
+
+Step by step:
+1. Uses reflection to find all public and protected properties on the form class
+2. For each property, looks for attribute annotations that are instances of `FieldAttribute`
+3. For each matching attribute, creates an instance and extracts its configuration
+4. Calls `$this->add()` to create a `Field` object
+5. Sets the form's property to the default value (if one exists)
+
+---
+
+## Hiding Attributes from Serialization
+
+The `#[Hidden]` attribute marks model properties that should be excluded from `toArray()` and `toJson()` output. This is useful for sensitive data like passwords.
+
+### Using `#[Hidden]`
+
+```php
+use Strux\Component\Model\Attributes\Hidden;
+
+class User extends Model
+{
+    #[Column]
+    #[Hidden]
+    public string $password;
+
+    #[Column]
+    #[Hidden]
+    public string $rememberToken;
+}
+```
+
+### `hide()` and `unhide()`
+
+Temporarily hide or reveal attributes on a model instance:
+
+```php
+$user = User::find(1);
+
+// Hide additional fields
+$user->hide(['email', 'phone'])->toArray();
+
+// Reveal hidden fields
+$user->unhide(['password'])->toArray();
+```
+
+### Conditional Visibility
+
+Pass a closure to conditionally apply hide/unhide:
+
+```php
+// Hide email only for non-admin users
+$user->hide(['email'], fn() => !$user->isAdmin);
+
+// Reveal password only in debug mode
+$user->unhide(['password'], fn() => config('app.debug'));
+```
+
+### Direct Access Still Works
+
+Hiding only affects serialization. Direct property access always works:
+
+```php
+$user = User::find(1);
+$user->toArray();  // password excluded
+$user->password;   // still accessible directly
+echo $user->password;  // works
+```
+
+### Collections
+
+`hide()` and `unhide()` work on collections too:
+
+```php
+$users = User::all()->hide(['password', 'rememberToken']);
+echo json_encode($users);  // password and token excluded from all users
+```
+
+---
+
+## CLI Command: `new:form`
+
+Generate form classes from the command line:
+
+```bash
+php bin/console new:form ProductForm
+```
+
+### Options
+
+| Option | Description | Example |
+|---|---|---|
+| `{name}` (required) | Form class name | `ProductForm` |
+| `--infer=ModelClass` | Auto-infer field types from a model | `--infer=Product` |
+| `--domain=Web` | Domain namespace for model inference | `--domain=Web` |
+| `--namespace=...` | Output namespace | `--namespace=App\\Http\\Form\\Admin` |
+| `--output=...` | Full output path | `--output=src/Http/Form/CustomForm.php` |
+| `--force` | Overwrite existing file | `--force` |
+| `--exclude=id,createdAt,...` | Skip properties when inferring | `--exclude=id,createdAt,updatedAt` |
+| `--rules=required` | Add validation rules to all fields | `--rules=required` |
+| `--no-submit` | Don't add submit button | `--no-submit` |
+
+### Examples
+
+**Skeleton form:**
+```bash
+php bin/console new:form ContactForm
+```
+
+**Infer from model:**
+```bash
+php bin/console new:form ProductForm --infer=Product --domain=Web
+```
+
+**With validation rules:**
+```bash
+php bin/console new:form ProductForm --infer=Product --rules=required
+```
+
+**Exclude fields, no submit:**
+```bash
+php bin/console new:form ProductForm --infer=Product --exclude=id,createdAt,updatedAt --no-submit
+```
+
+**Custom namespace:**
+```bash
+php bin/console new:form AdminForm --namespace=App\\Http\\Form\\Admin
+```
+
+### Generated Output (with `--infer`)
+
+```php
+<?php
+
+namespace App\Http\Form;
+
+use Strux\Component\Form\Form;
+use Strux\Component\Form\Attributes\StringField;
+use Strux\Component\Form\Attributes\DecimalField;
+use Strux\Component\Form\Attributes\BooleanField;
+use Strux\Component\Form\Attributes\DateTimeLocalField;
+use Strux\Component\Form\Attributes\TextAreaField;
+use Strux\Component\Form\Attributes\SubmitField;
+
+class ProductForm extends Form
+{
+    #[StringField(label: 'Title', rules: ['required'])]
+    protected string $title;
+
+    #[StringField(label: 'Slug', rules: ['required'])]
+    protected string $slug;
+
+    #[TextAreaField(label: 'Short Description')]
+    protected string $shortDescription;
+
+    #[TextAreaField(label: 'Description')]
+    protected string $description;
+
+    #[DecimalField(label: 'Price', rules: ['required'])]
+    protected string $price;
+
+    #[DecimalField(label: 'Old Price')]
+    protected string $oldPrice;
+
+    #[IntegerField(label: 'Stock', rules: ['required'])]
+    protected string $stock;
+
+    #[StringField(label: 'SKU')]
+    protected string $sku;
+
+    #[BooleanField(label: 'Featured')]
+    protected string $featured;
+
+    #[StringField(label: 'Status', rules: ['required'])]
+    protected string $status;
+
+    #[DateTimeLocalField(label: 'Sale Start At')]
+    protected string $saleStartAt;
+
+    #[DateTimeLocalField(label: 'Sale End At')]
+    protected string $saleEndAt;
+
+    #[SubmitField(label: 'Submit')]
+    protected string $submit;
+}
+```
+
+### Generated Output (without `--infer`)
+
+```php
+<?php
+
+namespace App\Http\Form;
+
+use Strux\Component\Form\Form;
+
+class ProductForm extends Form
+{
+    // Define your fields here using attributes:
+    // #[StringField(label: 'Name', rules: ['required'])]
+    // protected string $name;
 }
 ```
 
 ---
 
-## Summary
+## Forms in Controllers (Complete Example)
 
-* Forms are defined as **PHP classes**
-* Fields are declared using **attributes or build()**
-* Validation is automatic and rule-based
-* Data binding works with requests and models
-* Rendering is flexible and reusable
+### Create Action
 
-Next, explore **Validation Rules** or **Model Binding** in more depth to unlock the full power of Strux Forms.
+```php
+#[Route('/create', methods: ['GET', 'POST'], name: 'admin.products.create')]
+public function create(Request $request): Response
+{
+    $form = new ProductForm();
+
+    if ($request->is('POST')) {
+        $form->bind($request);
+
+        if ($form->isValid()) {
+            $product = new Product();
+            $product->title = $form->get('title');
+            $product->slug = $form->get('slug');
+            $product->price = (float) $form->get('price');
+            $product->stock = (int) $form->get('stock');
+
+            if ($this->productRepository->save($product)) {
+                $this->flash->set('success', 'Product created.');
+                return $this->redirect(route('admin.products.index'));
+            }
+        }
+
+        // Validation failed — fall through to re-render with errors
+        return $this->view('admin/products/create', ['form' => $form], 400);
+    }
+
+    return $this->view('admin/products/create', ['form' => $form]);
+}
+```
+
+### Edit Action
+
+```php
+#[Route('/edit/int:id', methods: ['GET', 'POST'], name: 'admin.products.edit')]
+public function edit(Request $request, int $id): Response
+{
+    $product = $this->productRepository->findByIdWithCategories($id);
+
+    if (!$product) {
+        $this->flash->set('error', 'Product not found.');
+        return $this->redirect(route('admin.products.index'));
+    }
+
+    // Auto-bind: the Product object populates the form fields
+    $form = new ProductForm($product);
+
+    if ($request->is('POST')) {
+        $form->bind($request);  // Overwrite with submitted data
+
+        if ($form->isValid()) {
+            $this->mapFormDataToProduct($form, $product, $request);
+
+            if ($this->productRepository->save($product)) {
+                $this->flash->set('success', 'Product updated.');
+                return $this->redirect(route('admin.products.index'));
+            }
+        }
+
+        return $this->view('admin/products/edit', ['form' => $form, 'product' => $product], 400);
+    }
+
+    return $this->view('admin/products/edit', ['form' => $form, 'product' => $product]);
+}
+```
+
+### Getting Values From the Form
+
+```php
+// Scalar values:
+$title = $form->get('title');                     // string or null
+$title = $form->get('title', 'Default Title');    // with fallback
+
+// Typed values:
+$price = (float) $form->get('price');             // explicit cast
+$stock = (int) $form->get('stock');               // explicit cast
+
+// Arrays (checkboxes, multi-select):
+$categories = $form->get('categories', []);       // falls back to empty array
+if (!empty($categories) && is_array($categories)) {
+    foreach ($categories as $catId) {
+        $product->categories()->attach((int) $catId);
+    }
+}
+
+// Via coercion (automatic):
+$form->field('isFeatured')->getValue();  // Returns bool if BooleanField (coerce: 'bool')
+```
+
+### Re-populating on Error
+
+After a POST fails validation, the form automatically retains the submitted values because `bind()` was already called:
+
+```php
+if ($request->is('POST')) {
+    $form->bind($request);  // Values now contain user input
+
+    if (!$form->isValid()) {
+        // Render with user's input + error messages — no manual repopulation needed
+        return $this->view('contact', ['form' => $form], 400);
+    }
+}
+```
+
+---
+
+## Complete Working Example
+
+### The Form Class
+
+```php
+<?php
+
+namespace App\Http\Form;
+
+use Strux\Component\Form\Form;
+use Strux\Component\Form\Attributes\StringField;
+use Strux\Component\Form\Attributes\EmailField;
+use Strux\Component\Form\Attributes\TextAreaField;
+use Strux\Component\Form\Attributes\BooleanField;
+use Strux\Component\Form\Attributes\SelectField;
+use Strux\Component\Form\Attributes\ListField;
+use Strux\Component\Form\Attributes\SubmitField;
+
+class ContactForm extends Form
+{
+    #[StringField(label: 'Full Name', rules: ['required', 'minLength:3'])]
+    protected string $name;
+
+    #[EmailField(label: 'Email Address', rules: ['required', 'email'])]
+    protected string $email;
+
+    #[SelectField(label: 'Department', rules: ['required'], options: [
+        '' => 'Select...',
+        'support' => 'Support',
+        'sales' => 'Sales',
+        'billing' => 'Billing',
+    ])]
+    protected string $department;
+
+    #[TextAreaField(label: 'Message', rules: ['required', 'minLength:10'])]
+    protected string $message;
+
+    #[BooleanField(label: 'Send me a copy')]
+    protected string $copyMe;
+
+    #[ListField(label: 'Topics of interest', options: [
+        'general' => 'General Inquiry',
+        'product' => 'Product Question',
+        'feedback' => 'Feedback',
+        'complaint' => 'Complaint',
+    ])]
+    protected string $topics;
+
+    #[SubmitField(label: 'Send Message')]
+    protected string $submit;
+}
+```
+
+### The Controller
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Form\ContactForm;
+use Strux\Component\Http\Request;
+use Strux\Component\Http\Response;
+use Strux\Component\Routing\Attributes\Route;
+use Strux\Component\Http\Controller\Web\Controller;
+
+class ContactController extends Controller
+{
+    #[Route('/contact', methods: ['GET', 'POST'], name: 'contact')]
+    public function contact(Request $request): Response
+    {
+        $form = new ContactForm();
+
+        if ($request->is('POST')) {
+            $form->bind($request);
+
+            if ($form->isValid()) {
+                $name = $form->get('name');
+                $email = $form->get('email');
+                $message = $form->get('message');
+
+                // Process the form...
+                mail('contact@example.com', "Contact from $name", $message);
+
+                $this->flash->set('success', 'Message sent!');
+                return $this->redirect(route('contact'));
+            }
+
+            return $this->view('contact', ['form' => $form], 400);
+        }
+
+        return $this->view('contact', ['form' => $form]);
+    }
+}
+```
+
+### The Template (Manual Composition)
+
+```php
+<form method="POST" action="/contact" class="space-y-6">
+    <div>
+        <?= $form->name->label(['class' => 'block font-bold mb-1']) ?>
+        <?= $form->name->input(['class' => 'form-input w-full', 'placeholder' => 'John Doe']) ?>
+        <?= $form->name->error('text-red-500 text-sm mt-1') ?>
+    </div>
+
+    <div>
+        <?= $form->email->label(['class' => 'block font-bold mb-1']) ?>
+        <?= $form->email->input(['class' => 'form-input w-full', 'placeholder' => 'john@example.com']) ?>
+        <?= $form->email->error('text-red-500 text-sm mt-1') ?>
+    </div>
+
+    <div>
+        <?= $form->field('department')->label(['class' => 'block font-bold mb-1']) ?>
+        <?= $form->field('department')->input(['class' => 'form-select w-full']) ?>
+        <?= $form->field('department')->error('text-red-500 text-sm mt-1') ?>
+    </div>
+
+    <div>
+        <?= $form->message->label(['class' => 'block font-bold mb-1']) ?>
+        <?= $form->message->input(['class' => 'form-input w-full', 'rows' => 6]) ?>
+        <?= $form->message->error('text-red-500 text-sm mt-1') ?>
+    </div>
+
+    <div>
+        <label class="flex items-center gap-2">
+            <?= $form->copyMe->input() ?>
+            <span>Send me a copy</span>
+        </label>
+    </div>
+
+    <div>
+        <?= $form->field('topics')->label(['class' => 'block font-bold mb-1']) ?>
+        <?= $form->field('topics')->input(['label_class' => 'checkbox-option']) ?>
+    </div>
+
+    <div>
+        <?= $form->submit->input() ?>
+    </div>
+</form>
+```
+
+### The Template (Using `render()`)
+
+```php
+<?= $form->render(['class' => 'space-y-6']) ?>
+```
+
+### The Template (Using `render()` with Layout Callback)
+
+```php
+<?= $form->render(['class' => 'grid grid-cols-1 md:grid-cols-2 gap-6'], function($fields, $form) {
+    $html = '';
+    foreach ($fields as $field) {
+        $type = $field->getType();
+        $spanClass = in_array($type, ['textarea', 'checkbox', 'submit']) ? 'md:col-span-2' : '';
+
+        $html .= sprintf('<div class="form-field %s">', $spanClass);
+        $html .= $field->label(['class' => 'form-label']);
+        $html .= $field->input(['class' => 'form-input']);
+        $html .= $field->error('form-error');
+        $html .= '</div>';
+    }
+    return $html;
+}) ?>
+```
+
+---
+
+## Field Attribute Configuration Table
+
+| Attribute | `type` (HTML) | `coerce` | Extra defaults |
+|---|---|---|---|
+| `StringField` | `text` | — | — |
+| `TextAreaField` | `textarea` | — | — |
+| `EmailField` | `email` | — | — |
+| `PasswordField` | `password` | — | — |
+| `HiddenField` | `hidden` | — | `label: null` |
+| `SearchField` | `search` | — | — |
+| `URLField` | `url` | — | — |
+| `TelField` | `tel` | — | — |
+| `IntegerField` | `number` | `int` | `step="1"`, `inputmode="numeric"` |
+| `DecimalField` | `text` | `float` | `step="0.01"`, `inputmode="decimal"` |
+| `FloatField` | `number` | `float` | `step="any"`, `inputmode="decimal"` |
+| `BooleanField` | `checkbox` | `bool` | Hidden+checkbox dual input |
+| `SelectField` | `select` | — | — |
+| `SelectMultipleField` | `select` | `array` | `multiple: true` |
+| `RadioField` | `radio` | — | Multiple options |
+| `ListField` | `list` | `array` | Checkbox list via `fieldType` |
+| `DateField` | `date` | — | — |
+| `TimeField` | `time` | — | — |
+| `DateTimeField` | `datetime` | — | — |
+| `DateTimeLocalField` | `datetime-local` | — | — |
+| `IntegerRangeField` | `range` | `int` | `step="1"` |
+| `DecimalRangeField` | `range` | `float` | `step="any"` |
+| `FileField` | `file` | — | — |
+| `MultipleFileField` | `file` | `array` | `multiple: true` |
+| `SubmitField` | `submit` | — | `class="btn btn-primary"` |
+| `ButtonField` | `submit` | — | `class="btn btn-primary"` |
+
+---
+
+## Common Pitfalls
+
+1. **Checkbox fields always submit a value** — The hidden+checkbox dual input means a BooleanField always submits either `0` or `1`. Use `BooleanField` (not `StringField`) for boolean toggles.
+
+2. **SelectMultipleField and ListField names** — They render with `name="field[]"` so PHP receives an array. Always use `coerce: 'array'` (automatically applied on these types).
+
+3. **Default values vs bound values** — The default value from the attribute is only used if no data is bound. Once `bind()` is called, the bound value overrides the default.
+
+4. **Empty strings vs null** — The field value after binding an empty input is an empty string `""`, not `null`. The form's property setter converts `null` to `""` for `string`-typed properties.
+
+5. **Date binding from models** — When binding a `DateTime` property from a model, the form converts it to `Y-m-d\TH:i:s` format. Your database stores dates as `Y-m-d H:i:s` — the form handles the conversion automatically.
+
+6. **Protected properties** — Form field properties are `protected`. This is intentional: the `__get()` magic method intercepts access and returns the `Field` object instead of the raw string value. Direct property access (`$form->title`) returns the `Field` object; use `$form->get('title')` for the value.
+
+7. **Validation order** — Rules are validated in the order they are defined. The first rule to fail stops further rule checks for that field (the `break` in `validateField()`).
+
+8. **`render()` vs manual composition** — Use `render()` for simple forms (settings, quick CRUD). Use manual composition for complex forms with icons, custom layouts, or mixed field groupings.
+
+9. **Grid layout with `render()`** — When using a grid class on the form element, each field wrapper becomes a grid cell. Use the layout callback to add `md:col-span-2` for fields that should span full width.
+
+10. **`#[Hidden]` is serialization-only** — Hidden properties are still persisted to the database and accessible directly. They're only excluded from `toArray()` and `toJson()` output.
