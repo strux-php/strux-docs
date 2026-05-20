@@ -1,52 +1,50 @@
----
-title: Validation
-sidebar_position: 5
----
-
 # Validation
 
-Strux provides a flexible, rule-based validation system that can be used **standalone** or **integrated with Forms**.
+Welcome to Validation in the Strux Framework! 
 
-:::info
-The same validation engine powers both manual validation and form validation, ensuring consistent behavior across your application.
-:::
+Whenever you are taking data from a user—whether they are filling out a "Contact Us" form, registering for an account, or an API is pushing data into your system—you must **never trust that data**. Users make typos, bots try to spam your database, and sometimes, unexpected things just happen.
 
----
+Validation is the process of building a "bouncer" for your application. This bouncer checks every single piece of data trying to get in, and if the data doesn't meet your strict rules (e.g., "The password must be 8 characters" or "The email must be a real email"), the bouncer politely rejects it and tells the user exactly what went wrong.
 
-## Overview
-
-The validation system allows you to:
-
-- Validate raw request data manually
-- Apply rules using strings or rule objects
-- Customize error messages per rule
-- Define custom validation logic
-- Reuse rules across controllers and forms
+In Strux, we've made this bouncer incredibly smart, fast, and remarkably easy to talk to!
 
 ---
 
-## Using the Validator
+## The Basics of Validation
 
-You can manually instantiate the `Validator` service inside your controllers.
+At its core, the Strux Validation component allows you to define a list of rules for your data. You provide the `Validator` with two things:
+1. The **data** you want to check (usually an array of user inputs).
+2. The **rules** you want to enforce.
+
+Here is what a basic validation check looks like:
 
 ```php
 use Strux\Component\Validation\Validator;
-use Strux\Component\Validation\Rules\Required;
-use Strux\Component\Validation\Rules\Email;
 
-$validator = new Validator($request->all());
+$validator = new Validator();
 
-$validator->add('email', [
-    'required',               // String syntax
-    new Email('Invalid!')     // Object syntax with custom message
-]);
+// The data submitted by the user
+$data = [
+    'email' => 'bad-email-address',
+    'age' => 15
+];
 
-if ($validator->isValid()) {
-    // Proceed...
+// The rules our bouncer will enforce
+$rules = [
+    'email' => ['required', 'email'],
+    'age'   => ['required', 'numeric', 'min:18']
+];
+
+if ($validator->validate($data, $rules)) {
+    echo "Welcome in!";
 } else {
+    // The data failed! Let's see what went wrong...
     $errors = $validator->getErrors();
+    print_r($errors);
 }
-````
+```
+
+In the example above, the validation will fail. The `$errors` array will automatically contain beautifully formatted, human-readable error messages explaining exactly *why* it failed, ready for you to show back to the user!
 
 ---
 
@@ -79,59 +77,128 @@ Rules may be defined using:
 
 ---
 
-## Custom Validation
+## Custom Error Messages (The Associative Array Magic)
 
-You may define custom validation logic using **Closures** (anonymous functions).
+Sometimes, the default framework error messages are a bit too robotic. For example, if a user forgets to type their name, the default message might say: *"The field is required."* 
 
-:::warning Limitation
-Closures **cannot be used inside PHP attributes**.
-They must be added via the `Validator` or the form’s `build()` method.
-:::
+But what if you want to be more conversational? What if you want it to say: *"Hey there! We really need your name so we know what to call you."*
+
+Strux makes this incredibly easy. Instead of just listing the rules as simple strings, you can pass an **associative array** where the **key** is the rule, and the **value** is your custom error message!
 
 ```php
-// Inside Form::build()
-$this->add('username', 'text', [
-    'rules' => [
-        'required',
-        function ($value, $data) {
-            if ($value === 'admin') {
-                return 'The username "admin" is reserved.';
-            }
-
-            return true; // Valid
-        }
+$rules = [
+    'username' => [
+        // Rule => Custom Message
+        'required' => 'Hey there! We really need your username.',
+        'alpha'    => 'Your username can only contain letters. No numbers or symbols, please!',
+        'min:3'    => 'That is a bit too short! Make sure your username is at least 3 characters.'
     ]
-]);
+];
 ```
+
+When the Validator runs, it will intelligently read the keys. If the data fails the `min:3` rule, it won't give the user a boring default message; it will give them your exact, custom string. This allows you to build highly personalized, branded experiences without writing complicated custom logic.
 
 ---
 
-## Custom Error Messages
+## Creating Your Own Custom Rules
 
-Custom error messages are best defined using **object-based rules**.
+While Strux comes with a huge library of built-in rules (`required`, `email`, `numeric`, `alpha`, `unique`, etc.), every application is unique. Eventually, you will need a rule that is specific to your business logic.
+
+For example, imagine you run a warehouse, and every Product SKU must start with the letters `PROD-`. 
+
+Strux allows you to create your own reusable rules. All you have to do is create a class that implements the `Strux\Component\Validation\Rules\RulesInterface`.
+
+### Step 1: Create the Rule Class
+Create a new file in your application's `App\Validation\Rules` directory:
 
 ```php
-#[StringField(rules: [
-    new Required('Hey! We really need your email.'),
-    new Email('This does not look like a valid email address.')
-])]
-protected string $email;
+namespace App\Validation\Rules;
+
+use Strux\Component\Validation\Rules\RulesInterface;
+
+class SkuFormat implements RulesInterface
+{
+    public function validate($value, $data = null): ?string
+    {
+        // If the field is completely empty, we just ignore it.
+        // Let the 'required' rule handle empty fields!
+        if ($value === null || $value === '') {
+            return null; 
+        }
+
+        // Check if our string starts with 'PROD-'
+        if (!str_starts_with((string) $value, 'PROD-')) {
+            // Return the error message if it fails!
+            return 'Every SKU in our warehouse must start with PROD-.';
+        }
+
+        // Returning null means the validation PASSED.
+        return null;
+    }
+}
 ```
 
-:::tip Recommended
-Use object syntax for clarity, reusability, and full control over messaging.
-:::
+### Step 2: The Magic of "Userland Overrides" (Cascading Resolution)
 
-Some string rules may support message parameters depending on implementation, but object rules are preferred.
+Now, how do you use this rule? Do you have to instantiate it with `new SkuFormat()` every time? **Nope!**
+
+Strux has a brilliant feature called **Cascading Resolution** (sometimes called Userland Overrides). When the Validator sees a string rule in your array—for example, `'skuFormat'`—it searches for the logic in a very specific order:
+
+1. **Your Application First:** It checks if a class exists at `App\Validation\Rules\SkuFormat`.
+2. **The Framework Second:** If it doesn't find it in your app, it falls back to looking inside the core framework at `Strux\Component\Validation\Rules\SkuFormat`.
+
+This means you can simply use your brand new rule as a standard string!
+
+```php
+$rules = [
+    'item_code' => ['required', 'skuFormat']
+];
+```
+
+#### Overriding Core Rules
+Because Strux checks *your* application namespace before it checks the framework, you have the ultimate power to **override core framework rules**. 
+
+Don't like how the built-in `Email` rule works? Do you want to enforce that all emails must belong to a specific corporate domain? 
+Just create a class at `App\Validation\Rules\Email`. The moment you create that file, Strux will start using *your* version of the `'email'` rule across your entire application instead of the default one! 
+
+---
+
+## Inline Validation (Using Callbacks)
+
+What if you have a very specific, one-time validation rule that you are only ever going to use in one single place? Creating a whole new class in `App\Validation\Rules` might feel like overkill.
+
+For these situations, you can use the built-in `Callback` rule. This allows you to pass a quick, inline function directly into your rules array.
+
+```php
+use Strux\Component\Validation\Rules\Callback;
+
+$rules = [
+    'age' => [
+        'required',
+        new Callback(function($value, $data) {
+            if ($value == 42) {
+                return "Sorry, nobody who is exactly 42 years old is allowed in. It's a weird rule, we know.";
+            }
+            return null; // Passed!
+        })
+    ]
+];
+```
+
+**A Note on PHP Attributes (ORM):** 
+If you are using the ORM's `#[Validate]` attribute (which we will talk about in the Models documentation), PHP does not allow you to write inline anonymous functions `function() { ... }` inside attributes. 
+Instead, you can pass an array pointing to a static method on your class:
+
+```php
+#[Validate([
+    'required',
+    new Callback([self::class, 'myCustomMethod'])
+])]
+public string $specialField;
+```
 
 ---
 
 ## Summary
 
-* Validation can be used **with or without Forms**
-* Rules support **string and object syntax**
-* Object rules enable custom messages and configuration
-* Closures allow advanced validation logic
-* The same system powers all Strux validation
-
-Next, explore how Validation integrates directly with **Forms** to create fully self-validating user input flows.
+Validation doesn't have to be a chore! By utilizing custom associative arrays for friendly messages, building your own rules in the `App\Validation\Rules` namespace, and letting Strux handle the heavy lifting, you can ensure your database stays perfectly clean while providing a wonderful, communicative experience for your users.

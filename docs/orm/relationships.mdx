@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # ORM Relationships
 
-Strux ORM relationships are defined **on model properties**, not methods.
+Strux ORM relationships are defined **on model properties**, not methods. They use a distinct **"Ownership"** naming theme to make database structure explicit.
 
 :::info
 Relationships are resolved dynamically via `__call()` and support lazy and eager loading.
@@ -17,41 +17,53 @@ Relationships are resolved dynamically via `__call()` and support lazy and eager
 
 Strux supports:
 
-- One-to-Many (`HasMany`)
-- Many-to-One (`BelongsTo`)
-- Many-to-Many (`BelongsToMany`)
+- One-to-One (`OwnsOne`)
+- One-to-Many (`OwnsMany`)
+- Many-to-One (`OwnedBy`)
+- Many-to-Many (`OwnedByMany`)
 
 ---
 
-## One-to-Many (HasMany)
+## One-to-One (OwnsOne)
 
 ```php
-use Strux\Component\Model\Attributes\HasMany;
+use Strux\Component\ORM\Attributes\OwnsOne;
+
+#[OwnsOne(related: Profile::class, foreignKey: 'userID')]
+public ?Profile $profile = null;
+```
+
+---
+
+## One-to-Many (OwnsMany)
+
+```php
+use Strux\Component\ORM\Attributes\OwnsMany;
 use Strux\Support\Collection;
 
-#[HasMany(related: Comment::class, foreignKey: 'postID')]
+#[OwnsMany(related: Comment::class, foreignKey: 'postID')]
 public Collection $comments;
-````
+```
 
 ---
 
-## Many-to-One (BelongsTo)
+## Many-to-One (OwnedBy)
 
 ```php
-use Strux\Component\Model\Attributes\BelongsTo;
+use Strux\Component\ORM\Attributes\OwnedBy;
 
-#[BelongsTo(related: User::class, foreignKey: 'userID')]
+#[OwnedBy(related: User::class, foreignKey: 'userID')]
 public ?User $author = null;
 ```
 
 ---
 
-## Many-to-Many (BelongsToMany)
+## Many-to-Many (OwnedByMany)
 
 ```php
-use Strux\Component\Model\Attributes\BelongsToMany;
+use Strux\Component\ORM\Attributes\OwnedByMany;
 
-#[BelongsToMany(
+#[OwnedByMany(
     related: Tag::class,
     pivotTable: 'post_tags',
     foreignPivotKey: 'post_id',

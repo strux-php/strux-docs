@@ -88,3 +88,184 @@ $user = User::create([
     'email' => 'john@example.com'
 ]);
 ```
+
+---
+
+## Attribute-Based Validation
+
+One of the most powerful features of Strux Models is **Auto-Validation**. 
+
+You should never save bad data into your database. To prevent this, Strux allows you to define validation rules directly on your Model properties using the `#[Validate]` PHP Attribute.
+
+```php
+namespace App\Domain\Web\Entity;
+
+use Strux\Component\ORM\Model;
+use Strux\Component\ORM\Attributes\Validate;
+use Strux\Component\Database\Attributes\Column;
+
+class Brand extends Model
+{
+    #[Column]
+    #[Validate([
+        'required' => 'The brand name is required!',
+        'alpha'    => 'The brand name must only contain letters.',
+        'min:3'    => 'The brand name must be at least 3 characters long.'
+    ])]
+    public string $name;
+
+    #[Column]
+    #[Validate([
+        'required',
+        'unique:brands,slug' => 'Oops! This slug is already taken.'
+    ])]
+    public string $slug;
+}
+```
+
+### How Auto-Validation Works
+
+When you call `$model->save()`, the Strux ORM is incredibly smart. It stops right before talking to the database and says, *"Hold on, let me check the rules first."*
+
+It reads all the `#[Validate]` attributes you defined and runs the data through the Validator.
+
+- If the data is **valid**, it saves it to the database and returns `true`.
+- If the data is **invalid**, it safely aborts the save, returns `false`, and stores the errors inside the model!
+
+You can then grab those errors and show them to the user:
+
+```php
+$brand = new Brand();
+$brand->name = "A"; // Fails the min:3 rule!
+
+if ($brand->save()) {
+    echo "Saved successfully!";
+} else {
+    $errors = $brand->getErrors();
+    // $errors['name'] will contain: 'The brand name must be at least 3 characters long.'
+}
+```
+
+*(To learn how to easily display these errors on a webpage, check out the Forms documentation!)*
+
+---
+
+## Relationships: The "Ownership" Theme
+
+Databases are rarely just isolated tables; they are connected! A `Brand` has many `Products`. A `Product` belongs to a `Category`.
+
+In Strux, we use a highly descriptive **"Ownership"** naming convention to define how your models are connected. This makes it instantly obvious how your database tables link together.
+
+There are four main relationship attributes:
+
+1. **`#[OwnsOne]`**: This model is the "parent" and holds exactly one "child" record. (The child table holds the foreign key).
+2. **`#[OwnsMany]`**: This model is the "parent" and holds multiple "child" records. (The child table holds the foreign key).
+3. **`#[OwnedBy]`**: This model is the "child". **It holds the foreign key** that points to a parent.
+4. **`#[OwnedByMany]`**: A Many-to-Many relationship using a pivot table.
+
+### Example
+
+Let's look at a `Brand` and a `Product`:
+
+```php
+use Strux\Component\ORM\Attributes\OwnsMany;
+use Strux\Component\ORM\Attributes\OwnedBy;
+
+class Brand extends Model
+{
+    // A Brand owns many products. 
+    // Strux will look for `brandId` on the products table!
+    #[OwnsMany(Product::class, 'brandId', 'brandId')]
+    public Collection $products;
+}
+
+class Product extends Model
+{
+    // A Product is owned by a Brand. 
+    // This means the `products` table has a `brandId` column!
+    #[OwnedBy(Brand::class, 'brandId', 'brandId')]
+    public Brand $brand;
+}
+```
+
+Once defined, you can magically access these relationships as if they were simple properties:
+```php
+$brand = Brand::find(1);
+
+// Get all products for this brand!
+foreach ($brand->products as $product) {
+    echo $product->title;
+}
+```
+
+---
+
+## Model Events
+
+Models are very "chatty." Throughout their lifecycle, they constantly announce what they are doing. This allows you to "listen" to a model and perform actions automatically in the background.
+
+For example, maybe you want to clear a cache whenever a `Product` is saved, or maybe you want to send an email when a `User` is created!
+
+### The 11 Lifecycle Events
+
+Strux models fire these 11 distinct events:
+
+*   **`Retrieved`**: Fired exactly when a model is pulled from the database and hydrated.
+*   **`Creating` / `Created`**: Fired *before* and *after* a brand new record is inserted.
+*   **`Updating` / `Updated`**: Fired *before* and *after* an existing record is updated.
+*   **`Saving` / `Saved`**: Fired *before* and *after* **both** creates and updates. (This is the most common event to listen to!)
+*   **`Deleting` / `Deleted`**: Fired *before* and *after* a model is deleted.
+*   **`Restoring` / `Restored`**: Fired *before* and *after* a soft-deleted model is restored.
+
+### Canceling Operations
+
+All of the **"before"** events (`Creating`, `Updating`, `Saving`, `Deleting`, `Restoring`) are special. They are **Cancelable**.
+
+If your listener decides that the operation should not happen, it can call `$event->cancel()`. The ORM will immediately halt the database operation and return `false`.
+
+```php
+use Strux\Component\Events\Attributes\Listener;
+use Strux\Component\ORM\Events\Saving;
+
+class PreventAdminTampering 
+{
+    #[Listener(event: Saving::class)]
+    public function handle(Saving $event): void
+    {
+        if ($event->model instanceof User && $event->model->email === 'admin@system.com') {
+            // STOP! Do not let anyone modify the super admin!
+            $event->cancel();
+        }
+    }
+}
+```
+
+---
+
+## Disabling Events Globally
+
+Sometimes, you *don't* want models to be chatty. 
+
+Imagine you are writing a massive data import script that creates 10,000 products at once. If every single product fires a `Saving` and `Created` event, your application might try to send 10,000 emails or clear the cache 10,000 times! That would destroy your server's performance.
+
+Strux provides a beautifully fluent API to temporarily silence these events. 
+
+You can put this configuration in your application's bootstrap file (like `AppRegistry::boot()`):
+
+```php
+use Strux\Component\ORM\Model;
+use Strux\Component\ORM\Events\Retrieved;
+
+// Disable a specific, noisy event globally
+Model::disableEvents()->only([
+    Retrieved::class
+]);
+
+// Or, disable absolutely everything (Great for bulk imports!)
+Model::disableEvents()->all();
+
+// You can always turn them back on later!
+Model::enableAllEvents();
+```
+
+With `Model::disableEvents()`, you are in complete control of your application's performance and side effects!

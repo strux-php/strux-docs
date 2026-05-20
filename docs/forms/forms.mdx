@@ -1771,6 +1771,71 @@ if ($request->is('POST')) {
 
 ---
 
+## Form Validation vs. ORM Validation
+
+When building an application, you actually have two "lines of defense" for validation:
+1. **Form Validation:** Checks the data *as soon as the user submits it*. (e.g., "Did they type a valid email format?")
+2. **ORM (Model) Validation:** Checks the data *right before it hits the database*. (e.g., "Does this email already exist in the `users` table?")
+
+Sometimes, data passes the Form validation but fails the ORM validation. For instance, the user might submit a valid slug format like `my-cool-brand`, but when the ORM tries to save it, it realizes that another brand is already using that exact slug!
+
+How do we let the user know?
+
+---
+
+## Injecting ORM Errors into Forms
+
+Strux provides a completely seamless way to pipe database errors straight back into your HTML forms. 
+
+When you attempt to save an Entity, and it fails due to validation, you can grab the errors from the Model using `$model->getErrors()`. Then, you simply pass those errors back into your Form using the **`$form->addErrors()`** method.
+
+Here is a real-world example from a Controller creating a new Brand:
+
+```php
+use App\Http\Form\Admin\BrandForm;
+use App\Domain\Web\Entity\Brand;
+
+public function create(Request $request): Response
+{
+    // 1. Create the Form instance
+    $form = new BrandForm($request);
+
+    // 2. Check if the user submitted the form, and if it passes basic Form Validation
+    if ($request->is('POST') && $form->isValid()) {
+        
+        // 3. Map the data to our ORM Entity
+        $brand = new Brand();
+        $brand->name = $form->get('name');
+        $brand->slug = $form->get('slug');
+
+        // 4. Try to save the Model
+        if ($brand->save()) {
+            // Success! The database accepted it.
+            return $this->redirect('/admin/brands');
+        }
+
+        // 5. Uh oh, it failed ORM Validation (e.g., the Slug was not Unique)
+        // Let's inject the database errors back into the Form!
+        $form->addErrors($brand->getErrors());
+        
+        $this->flash->set('error', 'Failed to save brand. Please check the errors below.');
+    }
+
+    // 6. Render the form. Any ORM errors injected above will automatically 
+    // display right under the offending input fields in the HTML!
+    return $this->view('admin/brands/create', [
+        'form' => $form
+    ]);
+}
+```
+
+### Why this is awesome
+Because of `$form->addErrors()`, your frontend templates don't need to change at all. Your HTML views still just call `<?= $form->field('slug')->error() ?>`. 
+
+The Form component doesn't care if the error came from a missing required field on the frontend, or a complex database-level uniqueness collision on the backend. It just renders the error beautifully for your users, keeping your user experience flawless!
+
+---
+
 ## Complete Working Example
 
 ### The Form Class
