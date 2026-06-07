@@ -42,7 +42,7 @@ const config = {
     ],
 
     themeConfig:
-    /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
+        /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
         ({
             announcementBar: {
                 id: 'support_us',
@@ -115,6 +115,15 @@ const config = {
                 theme: lightCodeTheme,
                 darkTheme: darkCodeTheme,
                 additionalLanguages: ['php', 'json', 'bash']
+            },
+            algolia: {
+                // The application ID provided by Algolia
+                appId: 'DXG8S3BFN4',
+                // Public API key: it is safe to commit it
+                apiKey: '6108d3a1a6f6032227de3eacd9e48963',
+                indexName: 'strux_framework',
+                // Optional: see doc section below
+                contextualSearch: true,
             },
         }),
 };
