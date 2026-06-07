@@ -44,6 +44,13 @@ const config = {
     themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
         ({
+            announcementBar: {
+                id: 'support_us',
+                content: '🚀 We’re taking Strux to the next level, and we need your help. <a target="_blank" rel="noopener noreferrer" href="/support">Become a sponsor</a> today! 🚀',
+                backgroundColor: 'var(--ifm-color-primary)',
+                textColor: '#ffffff',
+                isCloseable: true,
+            },
             image: 'img/docusaurus-social-card.jpg',
             navbar: {
                 title: 'Strux Framework',
@@ -55,8 +62,23 @@ const config = {
                     {
                         type: 'docSidebar',
                         sidebarId: 'tutorialSidebar',
-                        position: 'left',
+                        position: 'right',
                         label: 'Documentation',
+                    },
+                    {
+                        to: '/blog',
+                        position: 'right',
+                        label: 'Blog',
+                    },
+                    {
+                        to: '/community',
+                        position: 'right',
+                        label: 'Community',
+                    },
+                    {
+                        to: '/support',
+                        position: 'right',
+                        label: 'Support',
                     },
                     {
                         href: 'https://github.com/jbstrap/strux-framework',

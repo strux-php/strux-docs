@@ -1,0 +1,167 @@
+---
+title: Data Mapper
+slug: /mapper
+sidebar_position: 11
+description: Automatically translating arrays and request payloads into strongly-typed PHP objects.
+---
+
+## Introduction
+
+Think of the **Data Mapper** as a highly intelligent, automated translator for your application. 
+
+When a user submits a web form, the data comes into your application as a raw array of text and numbers. But your application relies on strongly-typed PHP objects (like a `Product` or `Customer` entity) to do its job. In the past, developers had to write dozens of lines of tedious code manually assigning every single form field to an object's property.
+
+The Strux Data Mapper completely automates this. You simply hand it the incoming raw data and your target object, and it reads your object's properties, automatically figures out what goes where, and seamlessly translates and casts the data into the correct formats for you!
+
+:::info
+The Mapper component uses PHP 8 Attributes and Reflection to dynamically inspect your objects and automatically assign data without you having to write any repetitive mapping logic.
+:::
+
+---
+
+## Basic Usage
+
+The Mapper is incredibly easy to use. In your controllers or services, simply inject the `MapperInterface` and call the `map()` method.
+
+```php
+use Strux\Component\Mapper\MapperInterface;
+use App\Domain\Web\Entity\Product;
+
+class ProductController extends Controller
+{
+    public function __construct(
+        private MapperInterface $mapper
+    ) {
+        parent::__construct();
+    }
+
+    public function store(Request $request): Response
+    {
+        // 1. Get raw array data from the form
+        $data = $request->input(); 
+
+        // 2. Create your empty target object
+        $product = new Product();
+
+        // 3. Let the Mapper do all the heavy lifting!
+        $this->mapper->map($data, $product);
+
+        $this->productRepository->save($product);
+        return $this->redirect('/products');
+    }
+}
+```
+
+By default, the Mapper will look for a key in the `$data` array that exactly matches the property name on your object. If it finds a match, it automatically casts the value to the correct type (string, integer, boolean, etc.) and assigns it.
+
+---
+
+## Controlling the Mapper with Attributes
+
+Sometimes, property names don't exactly match the incoming data, or there are properties you explicitly want the Mapper to ignore. Strux provides a set of powerful attributes to control exactly how the mapping behaves.
+
+### `#[MapFrom]`
+
+Use `#[MapFrom]` when the key in your incoming array is different from your property name.
+
+```php
+use Strux\Component\Mapper\Attributes\MapFrom;
+
+class UserProfile
+{
+    // If the form sends "first_name", map it to $firstName
+    #[MapFrom('first_name')]
+    public string $firstName;
+}
+```
+
+### `#[MapTo]`
+
+The Mapper can also run in reverse using `$mapper->reverseMap($object)`. This turns your object back into a raw array (useful for exporting to JSON or APIs). Use `#[MapTo]` to rename the output keys.
+
+```php
+use Strux\Component\Mapper\Attributes\MapTo;
+
+class UserProfile
+{
+    // Output this property as "user_age" instead of "age"
+    #[MapTo('user_age')]
+    public int $age;
+}
+```
+
+### `#[IgnoreMap]`
+
+Use `#[IgnoreMap]` to tell the Mapper to completely skip a property. This is highly recommended for sensitive fields (like passwords) or internal flags that should never be overwritten by a user's web form submission.
+
+```php
+use Strux\Component\Mapper\Attributes\IgnoreMap;
+
+class User
+{
+    public string $email;
+
+    // The mapper will refuse to overwrite the password hash
+    #[IgnoreMap]
+    public string $passwordHash;
+}
+```
+
+:::tip
+The Mapper is deeply integrated with the Strux ORM. It automatically detects and **ignores all database relationship properties** (like `Collection` relationships marked with `#[OwnsMany]`). You never have to worry about a malicious user overwriting your relations!
+:::
+
+---
+
+## Custom Converters
+
+Sometimes, simple type casting isn't enough. For example, a user might submit a comma-separated list of tags in a single text box (`"electronics, gadgets, apple"`), but your database object expects a structured PHP array (`['electronics', 'gadgets', 'apple']`).
+
+For complex transformations, you can build a custom **Converter**.
+
+### 1. Create a Converter Class
+
+Create a class that implements `ConverterInterface` with `convert()` (for incoming data) and `reverse()` (for outgoing data):
+
+```php
+use Strux\Component\Mapper\ConverterInterface;
+
+class TagsConverter implements ConverterInterface
+{
+    public function convert(mixed $value): mixed
+    {
+        // Turn comma-separated string into an array
+        if (is_string($value)) {
+            return array_map('trim', explode(',', $value));
+        }
+        return $value;
+    }
+
+    public function reverse(mixed $value): mixed
+    {
+        // Turn array back into a comma-separated string for the form
+        if (is_array($value)) {
+            return implode(', ', $value);
+        }
+        return $value;
+    }
+}
+```
+
+### 2. Apply it with `#[MapConverter]`
+
+Now, tag your object property with `#[MapConverter]`, passing in your new converter class:
+
+```php
+use Strux\Component\Mapper\Attributes\MapConverter;
+
+class Product
+{
+    public string $title;
+
+    #[MapConverter(TagsConverter::class)]
+    public ?array $tags = null;
+}
+```
+
+And that's it! The Mapper will instantly execute your custom logic whenever it encounters the `$tags` property, keeping your controllers completely free of messy parsing and formatting code!

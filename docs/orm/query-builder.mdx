@@ -82,12 +82,118 @@ $query->selectRaw('count(*) as count, status')
 
 ---
 
+---
+
 ## Executing Queries
 
 ```php
 $results = $query->get();
 $first   = $query->first();
 $exists  = $query->exists();
+```
+
+---
+
+## Query Caching (The "Stash" API)
+
+Sometimes, reading from the database can be slow, especially for complex queries. Strux provides a built-in memory system called the **Stash API**. Think of it as a photographic memory for your queries.
+
+Instead of hitting the database every time, the ORM saves the results in memory (like a quick-access filing cabinet).
+
+### The Automatic Way: `#[Stash]`
+You can tell an entire Model to always remember its answers by adding the `#[Stash]` attribute.
+
+```php
+use Strux\Component\Database\ORM\Attributes\Stash;
+
+// Stash ALL queries for this Model for 60 seconds
+#[Stash(ttl: 60)]
+class Setting extends Model 
+{
+}
+
+// Controller usage (Automatically cached, no extra code needed!):
+$settings = Setting::all(); 
+```
+
+### The Manual Way: `stashFor()`
+If you only want to cache one specific query, use `stashFor()` directly on the query builder:
+
+```php
+// Stash this specific query for 1 hour (3600 seconds)
+$popularProducts = Product::where('views', '>', 1000)
+    ->stashFor(3600, 'popular_products')
+    ->get();
+```
+
+### Invalidating the Stash
+If a product's views change, you need to clear the memory so the database is checked again:
+
+```php
+Product::dropStash('popular_products');
+```
+
+---
+
+## Multiple Database Support (Agnosticism)
+
+Strux is completely **Database Agnostic**. This means the ORM doesn't care if you're using MySQL, PostgreSQL, SQLite, or Microsoft SQL Server. It automatically translates your PHP code into the correct "dialect" for your specific database.
+
+You can configure your active database in `src/Config/Database.php`. The Query Builder will automatically detect the active `PDO` driver and seamlessly route the query generation behind the scenes.
+
+---
+
+## Dialect-Agnostic Upserts
+
+You can easily perform "insert or update" (upsert) operations without worrying about the underlying database driver. Strux dynamically converts the query to the correct syntax (e.g., `ON DUPLICATE KEY UPDATE` for MySQL, `ON CONFLICT DO UPDATE` for Postgres/SQLite, and `MERGE` for SQL Server).
+
+```php
+$query->upsert(
+    [
+        ['id' => 1, 'email' => 'a@test.com', 'name' => 'Alice'],
+        ['id' => 2, 'email' => 'b@test.com', 'name' => 'Bob'],
+    ],
+    ['id'], // Columns to determine uniqueness
+    ['name'] // Columns to update on conflict
+);
+```
+
+---
+
+## Processing Large Datasets
+
+When dealing with thousands of records, loading everything into memory via `get()` will cause memory exhaustion. Strux ORM provides memory-efficient chunking mechanisms.
+
+### Using Generators (`stream`)
+
+The `stream` method yields records one by one using a PHP Generator, fetching rows directly from the underlying PDO statement.
+
+```php
+foreach (User::query()->stream() as $user) {
+    // Process $user
+}
+```
+
+### Pagination with Limit/Offset (`batch`)
+
+Process records in chunks of a specific size using `LIMIT` and `OFFSET`.
+
+```php
+User::query()->batch(100, function ($users) {
+    foreach ($users as $user) {
+        // ...
+    }
+});
+```
+
+### Indexed Pagination (`batchByPrimaryKey`)
+
+For large tables, `OFFSET` becomes slow. The `batchByPrimaryKey` method provides a highly performant way to chunk using the primary key index (e.g., `WHERE id > ? LIMIT ?`).
+
+```php
+User::query()->batchByPrimaryKey(100, function ($users) {
+    // Process 100 users at a time without OFFSET penalty
+});
 ```
 
 ---

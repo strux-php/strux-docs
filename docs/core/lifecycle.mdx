@@ -13,20 +13,7 @@ This document walks through the journey from the user’s browser to the final r
 
 ## High-Level Flow
 
-```mermaid
-graph TD
-    A[User Request] --> B[web/index.php]
-    B --> C[Bootstrap::create]
-    C --> D[Container & Registries Load]
-    D --> E[App::run]
-    E --> F[ServerRequestCreator]
-    F --> G[Global Middleware Stack]
-    G --> H[Route Dispatcher]
-    H --> I[Controller Method]
-    I --> J[Response Object]
-    J --> K[ResponseEmitter]
-    K --> L[Output to Browser]
-````
+![Request Life Cycle](/img/request-lifecycle.png)
 
 ---
 

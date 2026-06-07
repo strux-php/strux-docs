@@ -3,106 +3,193 @@ title: Relationships
 sidebar_position: 2
 ---
 
-# ORM Relationships
+# ORM Relationships: Connecting Your World
 
-Strux ORM relationships are defined **on model properties**, not methods. They use a distinct **"Ownership"** naming theme to make database structure explicit.
+Rarely does data live in a vacuum. A **User** has many **Orders**. A **Product** belongs to a **Brand**. An **Article** can have many **Tags**.
+
+In the Strux framework, we use an **Ownership** theme for defining relationships. This makes it instantly obvious which model is the "parent" and which is the "child." 
 
 :::info
-Relationships are resolved dynamically via `__call()` and support lazy and eager loading.
+Unlike other frameworks where you define relationships inside functions, Strux relationships are defined directly on **model properties** using PHP Attributes. They are resolved dynamically and support both lazy and eager loading.
 :::
 
 ---
 
-## Relationship Types
+## 1. The Relationship Types
 
-Strux supports:
+Strux supports four main types of connections. Here is how to know which one to use:
 
-- One-to-One (`OwnsOne`)
-- One-to-Many (`OwnsMany`)
-- Many-to-One (`OwnedBy`)
-- Many-to-Many (`OwnedByMany`)
-
----
-
-## One-to-One (OwnsOne)
-
-```php
-use Strux\Component\ORM\Attributes\OwnsOne;
-
-#[OwnsOne(related: Profile::class, foreignKey: 'userID')]
-public ?Profile $profile = null;
-```
+| Type | When to use it | Example |
+| :--- | :--- | :--- |
+| **`#[OwnsOne]`** | One parent owns exactly one child. | A **User** has one **Profile**. |
+| **`#[OwnsMany]`** | One parent owns a list of children. | A **Brand** has many **Products**. |
+| **`#[OwnedBy]`** | The child points back to its parent. | A **Product** is owned by a **Brand**. |
+| **`#[OwnedByMany]`** | Many-to-Many connection via a third table. | A **Post** has many **Tags**, and a **Tag** has many **Posts**. |
 
 ---
 
-## One-to-Many (OwnsMany)
+## 2. Defining One-to-Many
+
+This is the most common relationship. Let's look at a **Brand** and its **Products**.
+
+### The Parent (`Brand`)
+The parent "owns" the children. It doesn't store any extra information in its own table.
 
 ```php
 use Strux\Component\ORM\Attributes\OwnsMany;
 use Strux\Support\Collection;
 
-#[OwnsMany(related: Comment::class, foreignKey: 'postID')]
-public Collection $comments;
+class Brand extends Model
+{
+    /**
+     * #[OwnsMany] tells Strux: "Go look in the Product table for a 'brandId' column."
+     */
+    #[OwnsMany(related: Product::class, foreignKey: 'brandId')]
+    public Collection $products;
+}
 ```
 
----
-
-## Many-to-One (OwnedBy)
+### The Child (`Product`)
+The child is "owned by" the parent. Crucially, **the child table holds the foreign key** (the `brandId`).
 
 ```php
 use Strux\Component\ORM\Attributes\OwnedBy;
 
-#[OwnedBy(related: User::class, foreignKey: 'userID')]
-public ?User $author = null;
-```
-
----
-
-## Many-to-Many (OwnedByMany)
-
-```php
-use Strux\Component\ORM\Attributes\OwnedByMany;
-
-#[OwnedByMany(
-    related: Tag::class,
-    pivotTable: 'post_tags',
-    foreignPivotKey: 'post_id',
-    relatedPivotKey: 'tag_id'
-)]
-public Collection $tags;
-```
-
----
-
-## Accessing Relationships
-
-### Lazy Loading
-
-```php
-$post = Post::find(1);
-
-foreach ($post->comments as $comment) {
-    // ...
+class Product extends Model
+{
+    /**
+     * #[OwnedBy] tells Strux: "I have a 'brandId' column that points to a Brand."
+     */
+    #[OwnedBy(related: Brand::class, foreignKey: 'brandId')]
+    public Brand $brand;
 }
 ```
 
 ---
 
-### Eager Loading
+## 3. Accessing Your Data
+
+Strux makes accessing relationships feel like you're just reading a normal property on an object.
+
+### Lazy Loading (Automatic)
+Strux doesn't fetch the related data until the moment you ask for it. This saves memory.
 
 ```php
-$posts = Post::query()
-    ->with('comments', 'author')
-    ->get();
+$brand = Brand::find(1);
+
+// The moment you touch this property, Strux runs a quick query to fetch the products!
+foreach ($brand->products as $product) {
+    echo $product->name;
+}
+```
+
+### Eager Loading (N+1 Prevention)
+If you are listing 50 brands and you want to show their products, Lazy Loading would run 50 separate queries! This is called the "N+1 problem" and it's very slow.
+
+Instead, use **`include()`** to fetch everything in just two queries total.
+
+```php
+// "Get all active brands and INCLUDE all their products at once."
+$brands = Brand::include('products')->where('active', 1)->get();
+
+foreach ($brands as $brand) {
+    // These are already in memory! No extra database trips.
+    echo count($brand->products);
+}
 ```
 
 ---
 
-## Relationship Ordering
+## 4. Eager Loading Constraints
+
+What if you want to include a relationship, but you only want a *filtered* version of it? For example: *"Give me the brands, but only include their products that are currently on sale."*
+
+Strux allows you to pass a **Closure** to the `include()` method:
 
 ```php
-use Strux\Component\Database\Attributes\OrderBy;
-
-#[OrderBy('createdAt', 'DESC')]
-public Collection $comments;
+$brands = Brand::include([
+    'products' => function($query) {
+        // This query builder is targeting the PRODUCTS table!
+        $query->where('onSale', 1)->orderBy('price', 'ASC');
+    }
+])->get();
 ```
+
+---
+
+## 5. Many-to-Many (`OwnedByMany`)
+
+Sometimes two tables are equal peers. A `Product` can have many `Categories`, and a `Category` can have many `Products`. To solve this, we use a "Pivot Table" (like `category_product`).
+
+```php
+class Product extends Model
+{
+    #[OwnedByMany(
+        related: Category::class,
+        pivotTable: 'category_product',
+        foreignPivotKey: 'productId',
+        relatedPivotKey: 'categoryId'
+    )]
+    public Collection $categories;
+}
+```
+
+---
+
+## 6. Polymorphic Relationships (Any-to-Any)
+
+Sometimes, a model needs to belong to *more than one* type of parent. 
+
+Imagine you have an `Image` model. Both a `User` and a `Product` can have images. If you use a normal `#[OwnedBy]`, you would need two columns: `userId` and `productId`. As your app grows (e.g., adding images to `Articles`), you'd have to keep adding columns!
+
+Polymorphic relationships solve this by saving two pieces of information on the child:
+1. **The ID** of the parent (e.g., `12`).
+2. **The Type** of the parent (e.g., `User` or `Product`).
+
+### The Child (`Image`)
+The child uses `#[OwnedByAny]` to say: "I can be owned by anything."
+
+```php
+use Strux\Component\Database\ORM\Attributes\OwnedByAny;
+
+class Image extends Model
+{
+    /**
+     * idColumn: The column storing the ID (e.g., 12).
+     * typeColumn: The column storing the Model class name (e.g., 'App\Models\User').
+     */
+    #[OwnedByAny(idColumn: 'ownerId', typeColumn: 'ownerType')]
+    public Model $owner;
+}
+```
+
+### The Parent (`User` or `Product`)
+The parent uses `#[OwnsManyPoly]` or `#[OwnsOnePoly]` to claim the child.
+
+```php
+use Strux\Component\Database\ORM\Attributes\OwnsManyPoly;
+
+class User extends Model
+{
+    #[OwnsManyPoly(related: Image::class, idColumn: 'ownerId', typeColumn: 'ownerType')]
+    public Collection $images;
+}
+
+class Product extends Model
+{
+    #[OwnsManyPoly(related: Image::class, idColumn: 'ownerId', typeColumn: 'ownerType')]
+    public Collection $images;
+}
+```
+
+Now, when you ask a User for their images, Strux will automatically search the `Image` table where `ownerType` is `User` and `ownerId` is the User's ID. Magic!
+
+---
+
+## Summary Best Practices
+
+1.  **Use `include()` often:** It's almost always better to be explicit about what data you need to keep your application fast.
+2.  **Explicit Keys:** While Strux tries to guess your foreign keys, it's a best practice to always type them out (e.g., `'brandId'`) to avoid surprises.
+3.  **Use Collections:** Relationship properties that return multiple rows (like `OwnsMany`) will always return a `Strux\Support\Collection` object, which has its own set of powerful helper methods!
+
+Build complex, interconnected data structures with ease using Strux Relationships!

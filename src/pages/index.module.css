@@ -2,32 +2,76 @@
 
 .heroBanner {
     padding: 6rem 0;
-    min-height: 80vh; /* Make it feel grand */
+    min-height: 75vh;
     display: flex;
     align-items: center;
+    background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 40%),
+                radial-gradient(circle at bottom left, rgba(236, 72, 153, 0.05), transparent 40%);
+}
+
+.heroLeft {
+    text-align: left;
+    align-self: center;
+}
+
+.heroRight {
+    align-self: center;
+    margin-top: 0;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.35rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--ifm-color-primary);
+    background-color: rgba(99, 102, 241, 0.15);
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.gradientText {
+    background: -webkit-linear-gradient(315deg, var(--ifm-color-primary-dark) 0%, var(--ifm-color-primary-light) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+[data-theme='dark'] .gradientText {
+    background: -webkit-linear-gradient(315deg, #fff 0%, var(--ifm-color-primary-light) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .buttons {
-    margin-top: 2rem;
+    margin-top: 2.5rem;
     display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
     justify-content: flex-start;
 }
 
 /* Mac-style Code Window */
 .codeWindow {
     background: var(--ifm-pre-background);
-    border-radius: 8px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12);
     overflow: hidden;
     border: 1px solid var(--ifm-color-emphasis-200);
+    max-width: 100%;
 }
 
 .codeHeader {
-    background: rgba(0,0,0,0.05);
-    padding: 10px 16px;
+    background: rgba(0, 0, 0, 0.03);
+    padding: 12px 18px;
     display: flex;
     align-items: center;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='dark'] .codeHeader {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .dot {
@@ -44,18 +88,126 @@
     opacity: 0.6;
 }
 
+.codeWindow pre {
+    font-size: 0.85rem !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+}
+
+/* Value Props Section */
+.valueProps {
+    padding: 4rem 0;
+    border-top: 1px solid var(--ifm-color-emphasis-200);
+    border-bottom: 1px solid var(--ifm-color-emphasis-200);
+    background: var(--ifm-background-surface-color);
+}
+
+.propCard {
+    text-align: center;
+    padding: 2rem 1.5rem;
+}
+
+.propIcon {
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+    display: inline-block;
+    padding: 1rem;
+    border-radius: 1rem;
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.propCard h3 {
+    font-weight: 700;
+    font-size: 1.5rem;
+}
+
+.propCard p {
+    color: var(--ifm-color-content-secondary);
+    line-height: 1.6;
+}
+
+/* Features Section styling */
+.featuresSection {
+    padding-top: 6rem;
+    padding-bottom: 6rem;
+}
+
+.featureBox {
+    padding: 2rem;
+    border-radius: 1rem;
+    border: 1px solid var(--ifm-color-emphasis-200);
+    background: var(--ifm-card-background-color);
+    height: 100%;
+    transition: all 0.2s ease-in-out;
+}
+
+.featureBox:hover {
+    transform: translateY(-5px);
+    border-color: var(--ifm-color-primary);
+    box-shadow: 0 10px 30px -10px rgba(99, 102, 241, 0.2);
+}
+
+.featureBox h4 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: var(--ifm-color-primary);
+}
+
+.featureBox p {
+    margin-bottom: 0;
+    color: var(--ifm-color-content-secondary);
+    line-height: 1.5;
+}
+
+/* Bottom CTA */
+.bottomCta {
+    padding: 6rem 0;
+    background: radial-gradient(circle at center, rgba(99, 102, 241, 0.1), transparent 60%);
+    border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.bottomCta h2 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    margin-bottom: 1rem;
+}
+
+.bottomCta p {
+    font-size: 1.2rem;
+    color: var(--ifm-color-content-secondary);
+}
+
+/* Media Queries */
 @media screen and (max-width: 996px) {
     .heroBanner {
-        padding: 2rem 0;
+        padding: 4rem 0;
+        min-height: auto;
+    }
+
+    .heroLeft {
         text-align: center;
+        margin-bottom: 3rem;
     }
 
     .buttons {
         justify-content: center;
     }
 
-    .codeWindow {
-        margin-top: 2rem;
-        text-align: left;
+    .valueProps {
+        padding: 3rem 0;
+    }
+
+    .propCard {
+        padding: 1.5rem 1rem;
+    }
+
+    .featuresSection {
+        padding-top: 4rem;
+        padding-bottom: 4rem;
+    }
+
+    .codeWindow pre {
+        font-size: 0.725rem !important;
     }
 }

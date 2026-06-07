@@ -25,6 +25,17 @@
     /* Layout */
     --ifm-navbar-height: 4rem;
     --ifm-container-width: 1200px;
+    
+    /* Base Font Size (Scales the whole project down) */
+    --ifm-font-size-base: 15px;
+
+    /* Sidebar Text Size */
+    --ifm-menu-color: var(--ifm-color-content);
+}
+
+/* Ensure last sidebar item is fully visible by adding bottom padding */
+.theme-doc-sidebar-menu {
+    padding-bottom: 4rem !important;
 }
 
 /* Dark Mode Overrides */
@@ -37,8 +48,12 @@
 
 /* Navbar - Glassmorphism */
 .navbar {
-    backdrop-filter: blur(12px);
     border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+@media (min-width: 996px) {
+    .navbar {
+        backdrop-filter: blur(12px);
+    }
 }
 [data-theme='dark'] .navbar {
     border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -55,10 +70,11 @@
 .hero__title {
     font-weight: 800;
     letter-spacing: -0.02em;
-    font-size: 3.5rem;
+    font-size: 2.75rem;
     background: -webkit-linear-gradient(315deg, var(--ifm-color-primary-dark) 0%, var(--ifm-color-primary-light) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    line-height: 1.2;
 }
 [data-theme='dark'] .hero__title {
     background: -webkit-linear-gradient(315deg, #fff 0%, var(--ifm-color-primary-light) 100%);
@@ -67,11 +83,21 @@
 }
 
 .hero__subtitle {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     color: var(--ifm-color-content-secondary);
     max-width: 600px;
-    margin: 1.5rem auto;
+    margin: 1.5rem 0;
     line-height: 1.6;
+}
+
+@media screen and (max-width: 996px) {
+    .hero__title {
+        font-size: 2rem;
+    }
+    .hero__subtitle {
+        font-size: 1rem;
+        margin: 1.5rem auto;
+    }
 }
 
 /* Feature Cards */

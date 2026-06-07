@@ -1,204 +1,200 @@
-# Validation
+# Validation in Strux
 
-Welcome to Validation in the Strux Framework! 
+Welcome to the world of Strux Validation! If you're building an application, you're essentially building a gateway for data. People will send you names, emails, prices, and passwords. But here's a secret every senior developer knows: **Users (and bots) send bad data.**
 
-Whenever you are taking data from a user—whether they are filling out a "Contact Us" form, registering for an account, or an API is pushing data into your system—you must **never trust that data**. Users make typos, bots try to spam your database, and sometimes, unexpected things just happen.
+Maybe they forgot to type their name. Maybe they typed "not-an-email" in the email box. Or maybe a hacker is trying to send a piece of code into your database.
 
-Validation is the process of building a "bouncer" for your application. This bouncer checks every single piece of data trying to get in, and if the data doesn't meet your strict rules (e.g., "The password must be 8 characters" or "The email must be a real email"), the bouncer politely rejects it and tells the user exactly what went wrong.
+Validation is your application's **Bouncer**. It stands at the door, checks every piece of data trying to get in, and says: *"Sorry, you can't come in until you look like a real email address."*
 
-In Strux, we've made this bouncer incredibly smart, fast, and remarkably easy to talk to!
+In Strux, we've designed this bouncer to be incredibly powerful, completely customizable, and—most importantly—easy to understand.
 
 ---
 
-## The Basics of Validation
+## 1. The Core Concept
 
-At its core, the Strux Validation component allows you to define a list of rules for your data. You provide the `Validator` with two things:
-1. The **data** you want to check (usually an array of user inputs).
-2. The **rules** you want to enforce.
+At its simplest level, validation in Strux requires three things:
+1.  **The Data:** Usually an array of information from a form (like `$_POST`).
+2.  **The Rules:** A list of requirements for that data.
+3.  **The Validator:** The engine that compares the data to the rules.
 
-Here is what a basic validation check looks like:
+### A Basic Example
+
+Imagine you have a simple signup form. Here is how you'd check the data manually:
 
 ```php
 use Strux\Component\Validation\Validator;
 
 $validator = new Validator();
 
-// The data submitted by the user
-$data = [
-    'email' => 'bad-email-address',
-    'age' => 15
+// 1. The user's input
+$userInput = [
+    'username' => 'jd',
+    'email'    => 'invalid-email'
 ];
 
-// The rules our bouncer will enforce
+// 2. Our rules
 $rules = [
-    'email' => ['required', 'email'],
-    'age'   => ['required', 'numeric', 'min:18']
+    'username' => ['required', 'minLength[3]'], // Note the new bracket syntax!
+    'email'    => ['required', 'email']
 ];
 
-if ($validator->validate($data, $rules)) {
-    echo "Welcome in!";
+// 3. Run the check
+if ($validator->validate($userInput, $rules)) {
+    echo "Everything looks great!";
 } else {
-    // The data failed! Let's see what went wrong...
+    // Oh no, something is wrong. Let's see what!
     $errors = $validator->getErrors();
     print_r($errors);
 }
 ```
 
-In the example above, the validation will fail. The `$errors` array will automatically contain beautifully formatted, human-readable error messages explaining exactly *why* it failed, ready for you to show back to the user!
+In this case, the bouncer would reject the data because the username is too short and the email isn't real. The `$errors` array would automatically contain friendly messages explaining exactly what happened.
 
 ---
 
-## Validation Rules Reference
+## 2. The Unique Bracket Syntax
 
-Rules may be defined using:
+One of the most distinct features of the Strux framework is our **Bracket Syntax** for rules. While other frameworks use colons (`min:3`), Strux uses brackets (`min[3]`). 
 
-* **String syntax** (e.g. `'minlength:5'`)
-* **Object syntax** (e.g. `new MinLength(5)`)
+Why? Because it's more expressive and uniquely identifies your application as a Strux-powered project. It feels more like calling a function with parameters.
 
-| Rule         | String Syntax       | Object Syntax         | Description                   |
-| ------------ | ------------------- | --------------------- | ----------------------------- |
-| Alpha        | `'alpha'`           | `new Alpha()`         | Alphabetic characters only    |
-| Alphanumeric | `'alphanumeric'`    | `new Alphanumeric()`  | Letters and numbers only      |
-| Confirmed    | `'confirmed'`       | `new Confirmed()`     | Matches `_confirmation` field |
-| Date         | `'date'`            | `new Date()`          | Valid date string             |
-| Email        | `'email'`           | `new Email()`         | Valid email format            |
-| Equal        | `'equal:val'`       | `new Equal('val')`    | Matches a specific value      |
-| In           | `'in:a,b,c'`        | `new In('a','b')`     | One of the allowed values     |
-| Integer      | `'integer'`         | `new Integer()`       | Valid integer                 |
-| MaxLength    | `'maxlength:10'`    | `new MaxLength(10)`   | Maximum string length         |
-| MinLength    | `'minlength:5'`     | `new MinLength(5)`    | Minimum string length         |
-| NotIn        | `'notin:a,b'`       | `new NotIn('a','b')`  | Must NOT be one of the values |
-| Numeric      | `'numeric'`         | `new Numeric()`       | Numeric values only           |
-| Password     | `'password'`        | `new Password()`      | Strong password validation    |
-| Regex        | `'regex:/pattern/'` | `new Regex('/patt/')` | Regular expression match      |
-| Required     | `'required'`        | `new Required()`      | Cannot be empty or null       |
-| Same         | `'same:other'`      | `new Same('other')`   | Matches another field         |
-| Url          | `'url'`             | `new Url()`           | Valid URL format              |
+### How to use it:
+- **`minLength[10]`**: "The text must be at least 10 letters long."
+- **`range[1, 100]`**: "The number must be between 1 and 100."
+- **`in[admin, editor, viewer]`**: "The value must be one of these three options."
+- **`unique[users, email]`**: "Go check the 'users' table and make sure no one else has this email."
 
 ---
 
-## Custom Error Messages (The Associative Array Magic)
+## 3. Conversational Error Messages
 
-Sometimes, the default framework error messages are a bit too robotic. For example, if a user forgets to type their name, the default message might say: *"The field is required."* 
+Default error messages can be boring. *"The field is required"* isn't very friendly. 
 
-But what if you want to be more conversational? What if you want it to say: *"Hey there! We really need your name so we know what to call you."*
-
-Strux makes this incredibly easy. Instead of just listing the rules as simple strings, you can pass an **associative array** where the **key** is the rule, and the **value** is your custom error message!
+In Strux, you can turn your rules into a conversation using **Associative Arrays**. Instead of just giving the Validator a list of rules, you give it a map of **Rule => Message**.
 
 ```php
 $rules = [
-    'username' => [
-        // Rule => Custom Message
-        'required' => 'Hey there! We really need your username.',
-        'alpha'    => 'Your username can only contain letters. No numbers or symbols, please!',
-        'min:3'    => 'That is a bit too short! Make sure your username is at least 3 characters.'
+    'full_name' => [
+        'required'     => 'We really need your name so we can say hi!',
+        'alpha'        => 'Names can only have letters. No robot names allowed!',
+        'range[3, 50]' => 'Your name must be between 3 and 50 characters.'
     ]
 ];
 ```
 
-When the Validator runs, it will intelligently read the keys. If the data fails the `min:3` rule, it won't give the user a boring default message; it will give them your exact, custom string. This allows you to build highly personalized, branded experiences without writing complicated custom logic.
+Now, if the user leaves the name blank, they'll see your custom "friendly" message instead of a generic framework error. This is a great way to give your application a unique personality!
 
 ---
 
-## Creating Your Own Custom Rules
+## 4. Reusable Rules (The Rule Class)
 
-While Strux comes with a huge library of built-in rules (`required`, `email`, `numeric`, `alpha`, `unique`, etc.), every application is unique. Eventually, you will need a rule that is specific to your business logic.
+Sometimes you have a rule that is very specific to your business. Maybe every "Coupon Code" in your store must start with `SAVE-`. 
 
-For example, imagine you run a warehouse, and every Product SKU must start with the letters `PROD-`. 
+Instead of writing complex code every time you use a coupon, you can create a **Reusable Rule Class**.
 
-Strux allows you to create your own reusable rules. All you have to do is create a class that implements the `Strux\Component\Validation\Rules\RulesInterface`.
-
-### Step 1: Create the Rule Class
-Create a new file in your application's `App\Validation\Rules` directory:
+### Step 1: Create the Class
+Create a new file in `src/Validation/Rules/Coupon.php`:
 
 ```php
 namespace App\Validation\Rules;
 
 use Strux\Component\Validation\Rules\RulesInterface;
 
-class SkuFormat implements RulesInterface
+class Coupon implements RulesInterface
 {
+    /**
+     * This is the engine of your rule.
+     * @param mixed $value The data the user typed.
+     * @param mixed $data The entire form data (if you need to compare fields).
+     * @return string|null Return an error message if invalid, or NULL if valid.
+     */
     public function validate($value, $data = null): ?string
     {
-        // If the field is completely empty, we just ignore it.
-        // Let the 'required' rule handle empty fields!
-        if ($value === null || $value === '') {
-            return null; 
+        if (empty($value)) return null; // Let 'required' handle empty fields
+
+        if (!str_starts_with((string)$value, 'SAVE-')) {
+            return "All coupons must start with 'SAVE-'.";
         }
 
-        // Check if our string starts with 'PROD-'
-        if (!str_starts_with((string) $value, 'PROD-')) {
-            // Return the error message if it fails!
-            return 'Every SKU in our warehouse must start with PROD-.';
-        }
-
-        // Returning null means the validation PASSED.
-        return null;
+        return null; // Passed!
     }
 }
 ```
 
-### Step 2: The Magic of "Userland Overrides" (Cascading Resolution)
+### Step 2: Userland Overrides (The Magic)
 
-Now, how do you use this rule? Do you have to instantiate it with `new SkuFormat()` every time? **Nope!**
+This is the most powerful part of the Strux architecture. When you use a rule name like `'coupon'`, Strux searches for the code in this order:
 
-Strux has a brilliant feature called **Cascading Resolution** (sometimes called Userland Overrides). When the Validator sees a string rule in your array—for example, `'skuFormat'`—it searches for the logic in a very specific order:
+1.  **Your Application:** `App\Validation\Rules\Coupon`
+2.  **The Framework:** `Strux\Component\Validation\Rules\Coupon`
 
-1. **Your Application First:** It checks if a class exists at `App\Validation\Rules\SkuFormat`.
-2. **The Framework Second:** If it doesn't find it in your app, it falls back to looking inside the core framework at `Strux\Component\Validation\Rules\SkuFormat`.
-
-This means you can simply use your brand new rule as a standard string!
-
+This means you can use your custom rule as a simple string!
 ```php
 $rules = [
-    'item_code' => ['required', 'skuFormat']
-];
+    'promo_code' => ['required', 'coupon'] // Strux finds your class automatically!
 ```
 
-#### Overriding Core Rules
-Because Strux checks *your* application namespace before it checks the framework, you have the ultimate power to **override core framework rules**. 
-
-Don't like how the built-in `Email` rule works? Do you want to enforce that all emails must belong to a specific corporate domain? 
-Just create a class at `App\Validation\Rules\Email`. The moment you create that file, Strux will start using *your* version of the `'email'` rule across your entire application instead of the default one! 
+**Note for Masters:** This also means you can **override the framework**. If you don't like the built-in `Email` rule, just create `App\Validation\Rules\Email`. Strux will instantly start using *your* version instead of its own!
 
 ---
 
-## Inline Validation (Using Callbacks)
+## 5. Built-in Rules Reference
 
-What if you have a very specific, one-time validation rule that you are only ever going to use in one single place? Creating a whole new class in `App\Validation\Rules` might feel like overkill.
+Strux comes pre-loaded with everything you need to build a professional application.
 
-For these situations, you can use the built-in `Callback` rule. This allows you to pass a quick, inline function directly into your rules array.
+| Rule | Syntax | What it checks |
+| :--- | :--- | :--- |
+| **Required** | `'required'` | Ensures the field isn't empty or null. |
+| **Email** | `'email'` | Ensures the data is a valid email format. |
+| **Numeric** | `'numeric'` | Ensures the data is a number (integer or decimal). |
+| **Integer** | `'integer'` | Ensures the data is a whole number. |
+| **Alpha** | `'alpha'` | Letters only (A-Z). |
+| **Alphanumeric** | `'alphanumeric'` | Letters and numbers only. |
+| **Slug** | `'slug'` | URL-friendly text (lowercase, numbers, and hyphens). |
+| **MinLength** | `'minLength[n]'` | Text must have at least `n` characters. |
+| **MaxLength** | `'maxLength[n]'` | Text cannot exceed `n` characters. |
+| **Range** | `'range[min, max]'` | Number must be between `min` and `max`. |
+| **In** | `'in[a, b, c]'` | Value must be one of the listed options. |
+| **Same** | `'same[field]'` | Value must match another field (perfect for "Confirm Password"). |
+| **Unique** | `'unique[table, col]'` | Ensures the value doesn't already exist in that database table. |
+
+---
+
+## 6. Validation in the ORM (Auto-Validation)
+
+While you can run validation manually, the most common way to use it is directly inside your **Models**.
+
+By adding the `#[Validate]` attribute to your model properties, Strux will automatically run the validation every single time you try to `save()`.
 
 ```php
-use Strux\Component\Validation\Rules\Callback;
+use Strux\Component\ORM\Attributes\Validate;
 
-$rules = [
-    'age' => [
-        'required',
-        new Callback(function($value, $data) {
-            if ($value == 42) {
-                return "Sorry, nobody who is exactly 42 years old is allowed in. It's a weird rule, we know.";
-            }
-            return null; // Passed!
-        })
-    ]
-];
-```
+class Product extends Model
+{
+    #[Column]
+    #[Validate([
+        'required' => 'Please name your product.',
+        'range[5, 100]' => 'The price must be between $5 and $100.'
+    ])]
+    public float $price;
+}
 
-**A Note on PHP Attributes (ORM):** 
-If you are using the ORM's `#[Validate]` attribute (which we will talk about in the Models documentation), PHP does not allow you to write inline anonymous functions `function() { ... }` inside attributes. 
-Instead, you can pass an array pointing to a static method on your class:
+$product = new Product();
+$product->price = 2.00;
 
-```php
-#[Validate([
-    'required',
-    new Callback([self::class, 'myCustomMethod'])
-])]
-public string $specialField;
+if (!$product->save()) {
+    // The save was blocked because the price was too low!
+    $errors = $product->getErrors();
+}
 ```
 
 ---
 
-## Summary
+## Summary Best Practices
 
-Validation doesn't have to be a chore! By utilizing custom associative arrays for friendly messages, building your own rules in the `App\Validation\Rules` namespace, and letting Strux handle the heavy lifting, you can ensure your database stays perfectly clean while providing a wonderful, communicative experience for your users.
+-   **Always Validate:** Never assume the data from a user is correct.
+-   **Be Descriptive:** Use associative arrays to provide helpful error messages.
+-   **Keep it Reusable:** If you use a custom regex more than twice, turn it into a Rule class in `App\Validation\Rules`.
+-   **Double Defense:** Use validation in your **Forms** for immediate feedback, and in your **Models** for permanent database integrity.
+
+Happy validating!

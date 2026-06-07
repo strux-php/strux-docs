@@ -1,0 +1,151 @@
+# Forms in Strux
+
+Forms are the primary way your users interact with your application. Whether they are searching for a product, checking out their cart, or creating a new brand in the admin panel, forms are everywhere.
+
+In Strux, the Form component takes the pain out of building, validating, and rendering HTML forms. It acts as a perfect bridge between the user's browser, your Controllers, and your database Models.
+
+---
+
+## 1. The Declarative Pattern
+
+Most frameworks make you write HTML by hand and then write separate logic to handle the data. In Strux, you use a **Declarative Pattern**. You define your form as a PHP class, and you tell the framework what fields it has using **Attributes**.
+
+### Creating a Form Class
+
+Here is a simple `ContactForm` example. It lives in `src/Http/Form/ContactForm.php`.
+
+```php
+namespace App\Http\Form;
+
+use Strux\Component\Form\Form;
+use Strux\Component\Form\Attributes\StringField;
+use Strux\Component\Form\Attributes\EmailField;
+use Strux\Component\Form\Attributes\TextAreaField;
+use Strux\Component\Form\Attributes\SubmitField;
+
+class ContactForm extends Form
+{
+    // The rules: Note the bracket syntax like minLength[3]
+    #[StringField(label: 'Your Name', rules: ['required', 'minLength[3]'])]
+    protected string $name;
+
+    #[EmailField(label: 'Email Address', rules: ['required', 'email'])]
+    protected string $email;
+
+    #[TextAreaField(label: 'Message', rules: ['required', 'minLength[10]'])]
+    protected string $message;
+
+    #[SubmitField(label: 'Send Message')]
+    protected string $submit;
+}
+```
+
+---
+
+## 2. Forms in Your Controllers
+
+Once you've defined your form class, using it in a Controller is a breeze.
+
+```php
+public function contact(Request $request): Response
+{
+    // 1. Create the form instance
+    $form = new ContactForm();
+
+    // 2. Check if the user is submitting data
+    if ($request->is('POST')) {
+        
+        // 3. Bind the request data to the form
+        $form->bind($request);
+
+        // 4. Check if the input follows your rules
+        if ($form->isValid()) {
+            // Success! Send the email...
+            $this->flash->set('success', 'Message sent!');
+            return $this->redirect('/thanks');
+        }
+        
+        // If it's invalid, the form now contains all the error messages!
+    }
+
+    // 5. Show the form to the user
+    return $this->view('contact', ['form' => $form]);
+}
+```
+
+---
+
+## 3. Rendering the HTML
+
+Strux gives you total control over how your form looks. You can render the entire form in one line, or build it piece-by-piece for a custom design.
+
+### The "Auto" Way (Fastest)
+
+Perfect for admin panels and simple settings pages:
+
+```php
+<?= $form->render(['class' => 'space-y-6']) ?>
+```
+
+### The "Manual" Way (Most Flexible)
+
+Perfect for premium frontend designs where you need specific icons and layouts:
+
+```php
+<form method="POST" action="/contact">
+    <?= csrf_token() ?>
+
+    <div>
+        <?= $form->name->label() ?>
+        <div class="input-wrap">
+            <i class="ph ph-user"></i>
+            <?= $form->name->input(['placeholder' => 'John Doe']) ?>
+        </div>
+        <?= $form->name->error() ?> <!-- This only shows up if there is an error! -->
+    </div>
+
+    <?= $form->submit->input() ?>
+</form>
+```
+
+---
+
+## 4. The Two Lines of Defense (ORM Injection)
+
+When building a professional application, you actually have two "lines of defense" for validation:
+
+1.  **Form Validation:** Checks the data *as soon as the user submits it*. (e.g., "Did they type a valid email format?")
+2.  **ORM (Model) Validation:** Checks the data *right before it hits the database*. (e.g., "Does this email already exist in the database?")
+
+Sometimes, data passes the Form validation but fails at the Database level (like a duplicate Slug). Strux makes it incredibly easy to pipe those database errors back into your form so the user can fix them.
+
+### Using `$form->addErrors()`
+
+```php
+if ($request->is('POST') && $form->isValid()) {
+    $brand = new Brand($form->getData());
+
+    if ($brand->save()) {
+        return $this->redirect('/admin/brands');
+    }
+
+    // 1. The database rejected it (maybe a duplicate name?)
+    // 2. Grab the ORM errors and put them back into the Form!
+    $form->addErrors($brand->getErrors());
+    
+    $this->flash->set('error', 'Please check the errors below.');
+}
+```
+
+Because of `$form->addErrors()`, your frontend code doesn't have to change! The form will magically display the database-level error right under the correct input field.
+
+---
+
+## Summary Best Practices
+
+1.  **Use `bind($request)`:** This not only gathers the data but also ensures the user's input is kept in the fields if they make a mistake.
+2.  **Custom Classes:** For complex fields like "Category Selects," override the `build()` method in your form to load options from the database.
+3.  **Manual Composition:** Don't be afraid to write your own `<form>` tags. The `field()->input()` methods are designed to be used inside your custom HTML.
+4.  **Always use `csrf_token()`:** It's a vital security feature that protects your users from "Cross-Site Request Forgery" attacks.
+
+Build beautiful, secure interfaces with Strux Forms!

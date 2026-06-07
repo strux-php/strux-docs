@@ -4,156 +4,181 @@ sidebar_position: 1
 description: Code-first database schema management using PHP attributes.
 ---
 
-# Database Migrations & Schema Management
+# Database Migrations: Version Control for Your Database
 
-Strux provides a **code-first migration system** inspired by Prisma and TypeORM — but built entirely with **native PHP attributes**.
+If you've ever worked on a team, you know that keeping everyone's database in sync can be a nightmare. Imagine you add a new `bio` column to the `users` table on your laptop. How do you make sure the production server and all your coworkers get that exact same column added to their databases?
 
-Your **models are the single source of truth** for the database schema.
+This is where **Migrations** come in. You can think of migrations as "Git for your database." They are essentially a historical log of every change you've ever made to your database structure. 
 
----
-
-## Key Features
-
-- Code-first schema definition
-- Automatic diff-based migrations
-- Smart PHP → SQL type inference
-- Safe column renaming
-- Automatic pivot tables
-- Relationship-driven foreign keys
+But Strux does migrations differently. In older frameworks, you had to write separate, complex "migration files" by hand. In Strux, we use a **Code-First approach**. Your PHP Models are the *single source of truth*. You just edit your PHP class, and the framework figures out the rest!
 
 ---
 
-## CLI Commands
+## 🌟 Key Features
 
-| Command | Description |
-|------|------------|
-| `db:init` | Initialize migration system |
-| `db:migrate` | Generate migration diff |
-| `db:upgrade` | Apply pending migrations |
-| `db:downgrade` | Roll back last batch |
-| `db:reset` | ⚠ Drop DB and re-run |
-| `db:fresh` | ⚠ Rebuild schema from scratch |
-| `db:history` | Show migration history |
-| `db:seed` | Run seeders |
+Strux's migration engine is incredibly powerful and handles the heavy lifting so you don't have to:
+
+- **Code-First Definition**: You define your tables, columns, and relationships directly in your PHP models using Attributes.
+- **Smart Diff Engine**: When you change a model, the framework automatically compares your PHP code to the actual database and generates the exact SQL needed to update it.
+- **Dialect-Agnostic Compilation**: Write your models once. Strux translates your generic column types into the exact right syntax whether you are using MySQL, PostgreSQL, SQLite, or SQL Server.
+- **Automatic Pivot Tables**: Defining a Many-to-Many relationship? Strux automatically creates the hidden middle-man tables (pivot tables) and sets up the foreign keys for you.
+- **Safe Renaming**: Change a column's name without losing your data using the `#[RenamedFrom]` attribute.
 
 ---
 
-## Defining Models
+## 🛠 The 3-Step Migration Workflow
 
-Models define your database schema.
+Making changes to your database is as easy as 1-2-3. Let's walk through an example of adding a new column.
+
+### Step 1: Update Your Model
+First, you add the new property directly to your PHP Model and slap a `#[Column]` attribute on it.
 
 ```php
-namespace App\Models;
+namespace App\Domain\Identity\Entity;
 
-use App\Core\Database\Attributes\Table;
-use App\Core\Database\Attributes\Id;
-use App\Core\Database\Attributes\Column;
-use App\Core\Database\Types\Field;
-use App\Core\Model\Model;
-use DateTime;
+use Strux\Component\Database\Schema\Attributes\Column;
+use Strux\Component\Database\Schema\Types\Field;
+use Strux\Component\Database\ORM\Model;
 
-#[Table('users')]
 class User extends Model
 {
-    #[Id, Column]
-    public ?int $id = null;
+    // ... existing properties ...
 
-    #[Column]
-    public string $username;
-
-    #[Column(type: Field::text, nullable: true)]
+    // We are adding a new 'bio' column!
+    #[Column(type: Field::mediumText, nullable: true)]
     public ?string $bio = null;
-
-    #[Column(type: Field::enum, enums: ['active', 'banned'], default: 'active')]
-    public string $status = 'active';
-
-    #[Column(type: Field::timestamp, currentTimestamp: true)]
-    public DateTime $createdAt;
-
-    #[Column(type: Field::timestamp, currentTimestamp: true, onUpdateCurrentTimestamp: true)]
-    public DateTime $updatedAt;
 }
-````
+```
+
+### Step 2: Generate the Diff (The Dry Run)
+Next, you tell the framework to compare your updated PHP code against the current database structure.
+
+```bash
+php bin/console db:migrate
+```
+
+> [!NOTE]
+> **What is happening here?** 
+> The framework sees that the `users` table in the database doesn't have a `bio` column yet. It automatically creates a brand new "Migration File" containing the SQL command `ALTER TABLE users ADD COLUMN bio MEDIUMTEXT`. **It does not touch your database yet.** This gives you a chance to review the generated code!
+
+### Step 3: Apply the Changes (The Real Deal)
+Once you are happy with the generated migration file, you execute it to permanently update the database.
+
+```bash
+php bin/console db:upgrade
+```
+Your database is now up to date! If your coworker pulls your code, they just run `db:upgrade` and their database will instantly add the `bio` column too.
 
 ---
 
-## Available Attributes
+## 🌍 Dialect-Agnostic Type Compilation
+
+One of the most revolutionary features of the Strux migration engine is its built-in **Type Translator**. 
+
+Databases speak different dialects. For example, MySQL uses `TINYINT(1)` for true/false values, but PostgreSQL uses `BOOLEAN`, and SQL Server uses `BIT`. If you write raw SQL, you are stuck using one specific database forever.
+
+**Strux fixes this completely.**
+
+When you define a column, you use generic `Field` enums (like `Field::boolean` or `Field::mediumText`). Before executing any SQL, the framework asks the active database connection what language it speaks.
+
+```php
+#[Column(type: Field::boolean)]
+public bool $isActive;
+```
+If you are connected to MySQL, Strux compiles this as `TINYINT(1)`. If you switch your `.env` file to connect to a PostgreSQL database, Strux will automatically compile this same code into `BOOLEAN`. **You never have to rewrite your models when changing databases!**
+
+---
+
+## 🏷 Schema Attributes Reference
+
+Here is a quick reference guide to the "sticky notes" (attributes) you use to design your database.
 
 ### `#[Table]`
+Tells the framework what the database table should be called. If you leave this out, Strux will automatically guess a plural name (e.g., `User` becomes `users`).
 
-Defines the table name.
+```php
+#[Table('store_users')]
+```
 
 ### `#[Id]`
-
-Marks the primary key.
+Marks a property as the **Primary Key**. Every single table must have exactly one Primary Key. It's the unique identifier for the row (usually an auto-incrementing integer or a UUID).
 
 ### `#[Column]`
+Marks a property to be saved in the database. Without this, the property only exists in memory.
 
-Supports:
+**Supported Options:**
+- `type`: Defines what kind of data is stored (e.g., `Field::string`, `Field::integer`).
+- `length`: Limits the size of strings (e.g., `length: 150`).
+- `nullable`: If `true`, the database allows this field to be empty (`NULL`). If `false`, it's required!
+- `unique`: Ensures no two rows can have the exact same value in this column.
+- `default`: Provides a fallback value if one isn't specified during creation.
 
-* `type`
-* `length`
-* `nullable`
-* `unique`
-* `default`
-* `currentTimestamp`
-* `onUpdateCurrentTimestamp`
+### `#[Index]`
+Speeds up your database searches. If you frequently search by a specific column, you should index it! Strux translates this into the correct `CREATE INDEX` syntax for your specific database dialect.
+
+```php
+// Put this on a property for a simple index
+#[Index]
+public string $status;
+```
 
 ### `#[RenamedFrom]`
+If you rename a property in PHP, the framework thinks you deleted the old column and created a brand new one. This will cause data loss! 
 
-Safely rename columns without data loss.
+Use this attribute to safely tell the database: "Hey, just rename the existing column!"
+
+```php
+// Safely renames the old 'address' column to 'billingAddress'
+#[Column]
+#[RenamedFrom('address')]
+public string $billingAddress;
+```
 
 ---
 
-## Relationships & Foreign Keys
+## 🔗 Automatic Relationships & Foreign Keys
 
-### BelongsTo
+In traditional databases, linking two tables together (like linking a User to an Order) requires manually creating "Foreign Keys." Strux handles this entirely behind the scenes.
+
+### 1-to-Many Connections
+When you define an ownership relationship in your model, Strux automatically generates the required Foreign Key constraint in the database.
 
 ```php
-#[BelongsTo(User::class, onDelete: 'CASCADE')]
+// Inside the Order model
+#[OwnedBy(User::class, 'user_id', onDelete: 'CASCADE')]
 public User $user;
 ```
+When you run `db:migrate`, Strux automatically ensures the `orders` table has a `user_id` column, and adds a constraint to ensure the User actually exists!
 
-Automatically generates:
-
-* `user_id` column
-* Foreign key constraint
-
----
-
-### Many-to-Many
+### Many-to-Many Pivot Tables
+If a User can have many Roles, and a Role can have many Users, you need a third table in the middle to connect them (a Pivot Table). Strux automatically creates this table for you!
 
 ```php
-#[BelongsToMany(Role::class, 'user_roles', 'user_id', 'role_id')]
+#[OwnedByMany(related: Roles::class, pivotTable: 'roles_users')]
 public Collection $roles;
 ```
-
-Creates a pivot table with foreign keys.
-
----
-
-## Migration Workflow
-
-1. Create or modify a model
-2. Generate migration
-
-```bash
-php console db:migrate
-```
-
-3. Review SQL (destructive ops are commented)
-4. Apply migration
-
-```bash
-php console db:upgrade
-```
+Running `db:migrate` will physically create the `roles_users` table in your database with the correct integer IDs and constraints. Magic!
 
 ---
 
-## Resetting Development Databases
+## 🚨 CLI Command Reference
 
-When things get messy:
+Here are all the commands you need to manage your database safely.
 
-```bash
-php console db:fresh
-```
+| Command | What it does (in plain English) |
+|------|------------|
+| `db:init` | Sets up the framework's internal tracking tables. Run this once on a brand new project. |
+| `db:migrate` | Scans your PHP files and creates a `.php` file containing the SQL needed to update your database. (Safe, makes no actual changes yet). |
+| `db:upgrade` | Takes any pending migration files and actually executes them on your database. |
+| `db:downgrade` | Made a mistake? This rolls back the very last batch of migrations you ran, reversing the changes safely. |
+| `db:history` | Shows a clean list of every migration that has ever been run on your database. |
+
+### ☢️ The "Nuclear" Options
+> [!CAUTION]
+> The following commands will DESTROY DATA. Only use them during local development when you want to wipe the slate clean. Never run these on a production server!
+
+| Command | What it does |
+|------|------------|
+| `db:reset` | Drops every single table in your database, then immediately re-runs all migrations from the beginning. |
+| `db:fresh` | Bypasses migration files entirely. It drops all tables and rebuilds the schema perfectly fresh by reading your current PHP models directly. |
+| `db:seed` | Fills your empty database with fake dummy data (using Entity Builders) so you have something to look at while developing. |
