@@ -27,4 +27,4 @@ With v1.0, we have achieved that.
 
 This is just the beginning. The core foundation is solid, but we are already hard at work on v1.1, which will bring massive improvements to the ORM, including relationship management and lifecycle hooks.
 
-To get started with v1.0, head over to the [Installation guide](/docs/getting-started/installation)!
+To get started with v1.0, head over to the [Installation guide](/docs/installation)!
