@@ -38,7 +38,7 @@ $user = $this->authManager->sentinel('web')->user();
 
 // The AuthManager will automatically check the user's roles against the 
 // redirect_map in your config, and return the correct URL!
-$redirectUrl = $this->authManager->resolveRedirectFor($user);
+$redirectUrl = $this->authManager->redirectFor($user);
 
 return $this->redirect($redirectUrl);
 ```

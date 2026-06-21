@@ -45,7 +45,7 @@ class AuthController extends Controller
                 $user = $this->authManager->sentinel('web')->user();
                 
                 // 4. Resolve their role-specific dashboard URL
-                $resolvedRedirect = $this->authManager->resolveRedirectFor($user);
+                $resolvedRedirect = $this->authManager->redirectFor($user);
                 
                 $this->flash->set('success', 'Logged in successfully. Welcome back!');
                 return $this->redirect($resolvedRedirect);

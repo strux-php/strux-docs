@@ -32,10 +32,10 @@ You can access the `AuthManager` anywhere via Dependency Injection, or use the g
 ```php
 // Using the helper
 $user = auth()->user();
-$isLoggedIn = auth()->check();
+$isLoggedIn = auth()->isAuthenticated();
 
 // Resolving dynamic redirects based on user roles
-$redirectUrl = auth()->resolveRedirectFor($user);
+$redirectUrl = auth()->redirectFor($user);
 ```
 
 ## Next Steps
