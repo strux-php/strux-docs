@@ -5,791 +5,720 @@ sidebar_position: 1
 
 # ORM Models: The Heart of Your Application
 
-Welcome to the heart of the Strux framework! If you've ever felt like managing a database was like trying to organize a library where all the books are scattered on the floor, then this is the documentation for you. 
+A **Model** is a PHP class that represents a table in your database. Each Model instance represents a single row in that table. If you have a `users` table, you have a `User` model. If you have a `products` table, you have a `Product` model.
 
-In this guide, we're going to explore **Models** and the **ORM** (Object-Relational Mapper). Don't let the technical names scare you. By the end of this page, you'll see that these are simply tools designed to make your life as a developer much, much easier.
+Strux uses the **Active Record** pattern. This means your data AND the logic to save/load that data live together in the same object.
 
----
-
-## What is a Model, Anyway?
-
-Imagine you're building a digital bookstore. You have "Books," "Authors," and "Customers." In a traditional database, these are stored in "Tables"—basically big spreadsheets with rows and columns.
-
-Without a Model, if you wanted to find a book, you'd have to write a complex command (called SQL) that looks like this:
-`SELECT * FROM books WHERE id = 42;`
-
-But we are PHP developers! We like working with **Objects**. A **Model** is simply a PHP class that acts as a "bridge" to your database table. 
-
-Instead of writing SQL, you just say:
-`$book = Book::find(42);`
-
-Suddenly, that row in your database is now a living PHP object in your code. You can change its title, update its price, and save it back to the database without ever touching a single line of raw SQL.
-
-:::info
-Strux uses the **Active Record** pattern. This means your data and the logic to save that data live together in the same object. It's a "Code-First" approach that puts you in total control.
-:::
+> [!TIP]
+> Think of a Model as a "smart container" for a database row. You fill it with data, tell it to save, and it handles all the SQL for you.
 
 ---
 
-## 1. Model Basics: Setting Up Your First Entity
+## 1. Creating a Model
 
-Before we can start doing magic, we need to tell Strux which PHP classes are Models. We do this using **Attributes**. Think of attributes as "sticky notes" that you put on your code to give the framework special instructions.
-
-### Your First Model: The User
-
-Let's look at how we define a simple `User` model. This file would live in `src/Domain/Identity/Entity/User.php`.
+Every model must extend the abstract `Strux\Component\Database\ORM\Model` class.
 
 ```php
-namespace App\Domain\Identity\Entity;
-
-// We import the tools we need from the framework
-use Strux\Component\Database\Schema\Attributes\Table;
+use Strux\Component\Database\Schema\Attributes\Entity;
 use Strux\Component\Database\Schema\Attributes\Column;
 use Strux\Component\Database\Schema\Attributes\Id;
 use Strux\Component\Database\Schema\Types\Field;
 use Strux\Component\Database\ORM\Model;
 
-/**
- * The #[Table] attribute tells Strux: "This class belongs to the 'users' table."
- */
-#[Table(name: 'users')]
+#[Entity(table: 'users')]
 class User extends Model
 {
-    /**
-     * Every table needs a "Primary Key"—a unique ID for every row.
-     * The #[Id] attribute marks this as the unique identifier.
-     */
     #[Id, Column(type: Field::integer)]
     public ?int $id = null;
 
-    /**
-     * The #[Column] attribute tells Strux to save this property in the database.
-     * Here, we set the type to a 'string' with a maximum length of 150 characters.
-     */
     #[Column(type: Field::string, length: 150)]
     public string $email;
-    
-    /**
-     * You can tell the database to provide a default value if one isn't specified.
-     */
-    #[Column(type: Field::string, default: 'active')]
-    public string $status;
 
-    /**
-     * You can also set default values directly on the PHP property!
-     */
+    #[Column(type: Field::string)]
+    public string $password;
+
     #[Column(type: Field::boolean)]
     public bool $active = true;
 }
 ```
 
-### Pro Tip: Where to store your models?
-In Strux, we recommend organizing your code by **Domain**. For example, everything related to Users and Security goes in the `Identity` domain. Everything related to your store goes in the `Web` domain. This keeps your project clean as it grows.
+> [!IMPORTANT]
+> Properties with `#[Column]` MUST be **public**. Protected and private properties are ignored by the ORM. This is by design — only public properties are persisted to the database.
 
-### Reusing Columns: The TimestampMixin
+### What Happens When You Create a Model
 
-Instead of duplicating timestamp columns across all your models, you can use the built-in `TimestampMixin` class to automatically get `created_at` and `updated_at` properties. This mimics modern ORM patterns (like SQLAlchemy's mixins).
-
-```php
-use App\Infrastructure\Database\Mixins\TimestampMixin;
-
-#[Table(name: 'brands')]
-class Brand extends TimestampMixin
-{
-    #[Id, Column(type: Field::integer)]
-    public ?int $id = null;
-
-    #[Column(type: Field::string)]
-    public string $name;
-}
-```
+1. The constructor is called with optional initial attributes.
+2. The ORM resolves the database connection from the container.
+3. It boots all traits (more on traits later).
+4. It fills the model with any provided attributes.
+5. It determines the table name from the `#[Entity]` attribute or by pluralizing the class name.
+6. It discovers the primary key from the `#[Id]` attribute.
 
 ---
 
-## 2. Configuring Your Columns
+## 2. CRUD: Create, Read, Update, Delete
 
-The `#[Column]` attribute is like a Swiss Army knife. It has a tool for every database scenario. Here are the most common options you'll use:
+These are the four fundamental operations you can perform on any model.
 
-| Option | What it does (in plain English) |
-| :--- | :--- |
-| **`name`** | Use this if your database column has a weird name (like `usr_email_addr`) but you want your PHP property to be nice and clean (`$email`). |
-| **`type`** | Tells the database what kind of data to expect. Is it a number (`integer`)? A sentence (`text`)? A true/false switch (`boolean`)? |
-| **`length`** | For text fields, how many letters are allowed? Common for passwords (255) or names (100). |
-| **`precision`** & **`scale`** | Used exclusively for `Field::decimal` types. `precision` is the total number of digits, and `scale` is the number of digits after the decimal point. |
-| **`nullable`** | If set to `true`, this field is optional. If the user leaves it blank, the database will store `NULL` instead of crashing. |
-| **`unique`** | This is a safety feature. It prevents two rows from having the same value (like two users having the same email address). |
-| **`default`** | Sets a default value at the database schema level. If you insert a row without this value, the database falls back to the default. |
-| **`enums`** | An array of allowed string values for `Field::enum`. e.g. `['active', 'banned']`. Strux safely maps this to `ENUM()` in MySQL, and gracefully falls back to `VARCHAR()` on PostgreSQL and SQLite to guarantee dialect-compatibility. |
-| **`currentTimestamp`** | Perfect for "Created At" fields. The database will automatically write the current date and time when the row is created. |
-| **`onUpdateCurrentTimestamp`** | Perfect for "Updated At" fields. The database will automatically update this to the current date and time whenever the row is modified! |
+### Creating Records
 
----
-
-## 3. Supported Column Types
-
-When defining a column with `#[Column(type: Field::...)]`, you have access to a rich set of database types that Strux automatically translates into the correct syntax for your active database dialect (MySQL, Postgres, SQLite, SQL Server, or Oracle).
-
-### 🔢 Integers
-| Field Enum | Description |
-| :--- | :--- |
-| `Field::int` (or `integer`) | Standard Integer |
-| `Field::intUnsigned` | Standard Integer (Unsigned - no negative numbers) |
-| `Field::tinyInteger` | Tiny Integer (often used for booleans or small ranges) |
-| `Field::smallInteger` | Small Integer |
-| `Field::mediumInteger` | Medium Integer |
-| `Field::bigInteger` | Big Integer (for massive numbers like snowflakes or financial IDs) |
-
-### 🔤 Strings & Text
-| Field Enum | Description |
-| :--- | :--- |
-| `Field::string` | Translates to `VARCHAR`. Highly recommended for short strings. Uses the `length` property (default 255). |
-| `Field::char` | Fixed-length string. Uses the `length` property. |
-| `Field::text` | Translates to `TEXT`. Use for longer strings like blog post bodies. |
-| `Field::mediumText` | Longer text field. |
-| `Field::longText` | Maximum length text field. |
-
-### 🧮 Decimals & Floats
-| Field Enum | Description |
-| :--- | :--- |
-| `Field::decimal` | Exact precision numbers (great for currency). Uses `precision` and `scale`. |
-| `Field::float` | Approximate precision floating-point number. |
-| `Field::double` | Double-precision floating-point number. |
-
-### 📅 Dates & Times
-| Field Enum | Description |
-| :--- | :--- |
-| `Field::date` | Stores a Date (YYYY-MM-DD). |
-| `Field::dateTime` | Stores both Date and Time. |
-| `Field::time` | Stores only the Time. |
-| `Field::timestamp` | Stores a Unix Timestamp. Excellent when combined with `currentTimestamp`. |
-| `Field::year` | Stores a 4-digit year. |
-
-### 🛠 Special Types
-| Field Enum | Description |
-| :--- | :--- |
-| `Field::boolean` | Translates to a boolean representation (e.g. `TINYINT(1)` in MySQL, `BOOLEAN` in Postgres). |
-| `Field::json` | Stores a JSON document. Strux ORM automatically casts this to a PHP array! |
-| `Field::enum` | Stores one of the strings provided in the `enums` array. (Dialect-agnostic fallback to `VARCHAR` applied automatically). |
-| `Field::binary` | Stores binary data (`BLOB`). |
-| `Field::uuid` | Stores a UUID. Maps to `CHAR(36)`. |
-| `Field::ulid` | Stores a ULID. Maps to `CHAR(26)`. |
-
----
-
-## 4. Database Indexing: Speeding Up Your Queries
-
-Indexes are like the index at the back of a large encyclopedia. Without an index, if you want to find every page that mentions "Apples", you have to read the entire book from start to finish. With an index, you just look up "Apples" and go straight to the correct pages. 
-
-In databases, indexes speed up your queries significantly. Strux provides a powerful, **dialect-agnostic** indexing system. This means whether you are using MySQL, PostgreSQL, SQLite, SQL Server, or Oracle, Strux knows the exact right grammar to safely create and destroy your indexes!
-
-### Single-Column Indexes
-If you frequently search for users by their `status` or `role`, you should index that column. You can do this by simply adding the `#[Index]` attribute directly to the property in your class.
-
-```php
-use Strux\Component\Database\Schema\Attributes\Index;
-
-class User extends Model
-{
-    #[Column]
-    #[Index]
-    public string $status;
-}
-```
-> [!TIP]
-> The framework will automatically name this index something like `users_status_idx`. If you want to give it a custom name for strict database administration policies, you can do: `#[Index(name: 'my_custom_status_idx')]`.
-
-### Unique Indexes
-If you want to ensure that two users can never have the same email address, you use a Unique Index. This enforces strict data integrity at the database level. Attempting to save a duplicate will throw a database error.
-
-```php
-    #[Column]
-    #[Unique] // Or alternatively: #[Index(unique: true)]
-    public string $email;
-```
-
-### Composite Indexes (Multi-Column)
-Sometimes you query the database using multiple columns at the exact same time. For example, finding a user by checking their `firstname` AND their `lastname`. For this, you want a Composite Index to maximize performance. 
-
-Because a composite index involves multiple columns acting together, you apply this attribute to the **Class** itself, not an individual property.
-
-```php
-use Strux\Component\Database\Schema\Attributes\Table;
-use Strux\Component\Database\Schema\Attributes\Index;
-
-#[Table('users')]
-#[Index(columns: ['firstname', 'lastname'], name: 'idx_user_name')]
-class User extends Model
-{
-    // ...
-}
-```
-
-> [!WARNING]
-> Order matters incredibly in composite indexes! An index defined on `['firstname', 'lastname']` will drastically speed up queries searching by *both* names, OR queries searching by *just* `firstname`. However, it will **NOT** help queries searching by just `lastname`. Always order your most-queried columns first.
-
----
-
-## 5. Creating and Saving Data (CRUD)
-
-"CRUD" stands for **C**reate, **R**ead, **U**pdate, and **D**elete. These are the four basic things you do with any data.
-
-### Creating a New Record
-
-Creating data is as simple as creating a new object and filling in its properties.
+#### Method 1: Create and Save
 
 ```php
 $user = new User();
-$user->email = 'hello@strux.com';
+$user->email = 'john@example.com';
+$user->password = password_hash('secret123', PASSWORD_BCRYPT);
 $user->active = true;
 
-// The save() method is the "Commit" button. 
-// It talks to the database for you.
-if ($user->save()) {
-    echo "Welcome to the team! Your ID is: " . $user->id;
+$result = $user->save(); // Returns true on success, false on failure
+
+if ($result) {
+    echo "User created with ID: " . $user->id;
 }
 ```
 
-### Mass Assignment: The "Fast Lane"
-
-If you have a big array of data (perhaps from a form), you don't want to type `$user->property = ...` twenty times. Use `create()` instead:
+#### Method 2: Static Create
 
 ```php
 $user = User::create([
-    'email' => 'jane@doe.com',
-    'active' => true
+    'email' => 'john@example.com',
+    'password' => password_hash('secret123', PASSWORD_BCRYPT),
+    'active' => true,
 ]);
 ```
 
-### Updating Existing Data
+The `create()` method:
+1. Creates a new instance of the model.
+2. Fills it with the provided attributes.
+3. Calls `save()`.
+4. Returns the model instance with the ID populated.
 
-To update someone, you must find them first, change their details, and then save them again.
+#### Method 3: Construct with Attributes
 
 ```php
-// Find the user with ID #1
-$user = User::find(1); 
-
-// Update their email
-$user->email = 'new-email@doe.com';
-
-// Save the changes back to the database
+$user = new User([
+    'email' => 'john@example.com',
+    'password' => password_hash('secret123', PASSWORD_BCRYPT),
+    'active' => true,
+]);
 $user->save();
 ```
 
----
+> [!WARNING]
+> `create()` and `fill()` ONLY set properties that have the `#[Column]` attribute. Non-column properties are ignored. This prevents accidentally saving internal state to the database.
 
-## 6. LINQ-Style Fluent Queries: Reading Data
+### Reading Records
 
-Reading data from a database is usually the hardest part of development. SQL queries can get very messy. 
-
-In Strux, we've implemented a modern, **LINQ-style** syntax. LINQ stands for "Language Integrated Query," and it's designed to make your code read like a story.
-
-### The Fluent Chain
-
-Instead of raw SQL, you "chain" methods together to build your query.
+#### Find by Primary Key
 
 ```php
-// "Include the user's profile, skip the first 10 results, and take 5."
-$users = User::include('profile')
-    ->where('active', 1)
-    ->orderBy('name', 'ASC')
-    ->skip(10)
-    ->take(5)
-    ->get();
+$user = User::find(1); // Returns the User with ID 1, or null if not found
 ```
 
-### Breaking Down the Language
-
-*   **`include()`**: (The Eager Loader) In other frameworks, this is called `with()`. It tells the ORM to fetch related data (like a user's roles) at the same time, so your app stays fast.
-*   **`skip()`**: (The Offset) Used for pagination. "Skip the first X records."
-*   **`take()`**: (The Limit) "Only give me X records." Perfect for showing "Top 10" lists.
-*   **`get()` or `all()`**: The "Go" button. This actually executes the query and returns a `Collection` of objects.
-
----
-
-## 7. Performance Power: Bulk Operations
-
-What happens if you need to import 5,000 products from a CSV file? If you loop through them and call `$product->save()` 5,000 times, your server will get very slow because it has to talk to the database 5,000 times.
-
-Strux has **Bulk Operations** to solve this. These methods allow you to send all that data in **one single trip** to the database.
-
-### Bulk Insert
+#### Find or Fail
 
 ```php
-User::insert([
-    ['email' => 'user_a@test.com', 'active' => 1],
-    ['email' => 'user_b@test.com', 'active' => 1],
-    ['email' => 'user_c@test.com', 'active' => 0],
-]);
+$user = User::findOrFail(1); // Returns the User, or throws an exception
 ```
 
-### Upsert: The "Smart" Synchronizer
-
-"Upsert" is a combination of **Up**date and In**sert**. It's perfect for syncing data. It says: *"Try to insert these users. But if a user with that email already exists, just update their active status instead of crashing."*
+#### Get All Records
 
 ```php
-User::upsert(
-    values: [
-        ['email' => 'jane@example.com', 'active' => 0]
-    ],
-    uniqueBy: ['email'], // Use the email to identify the row
-    update: ['active']   // Only update this column if it already exists
-);
+$users = User::all(); // Returns a Collection of all users
 ```
 
----
+#### Get the First Record
 
-## 8. Dirty State Tracking: Knowing What Changed
+```php
+$user = User::first(); // Returns the first user, or null
+```
 
-One of the coolest features in Strux is that your models "remember" their previous state. This is called **Dirty Tracking**. 
+#### Get the Last Record
 
-Imagine you only want to send an email if a user's status changes from "Pending" to "Active." How would you know what the status *was*?
+```php
+$user = User::last(); // Returns the last user (ordered by primary key DESC), or null
+```
+
+#### Get with Conditions
+
+```php
+$activeUsers = User::where('active', 1)->get();
+$firstActive = User::where('active', 1)->first();
+```
+
+> [!TIP]
+> `User::all()` is equivalent to `User::query()->get()`. Both return a `Collection`.
+
+### Updating Records
+
+#### Method 1: Find, Modify, Save
 
 ```php
 $user = User::find(1);
-$user->active = true;
-
-// 1. Check if ANY property has been touched
-if ($user->isDirty()) {
-    echo "Something changed!";
-}
-
-// 2. Check if a SPECIFIC property changed
-if ($user->isDirty('active')) {
-    // Get the old value from the database memory
-    $oldStatus = $user->getOriginal('active'); 
-    
-    echo "Status changed from {$oldStatus} to true!";
-}
+$user->email = 'newemail@example.com';
+$user->save();
 ```
 
----
-
-## 9. Data Transformers: Accessors, Mutators & Attributes
-
-Sometimes, the way data is stored in the database isn't the way you want to use it in your code. Strux gives you two ways to handle this: **Methods** or **Attributes**.
-
-### The Modern Way: Using Attributes
-If you want a clean, elegant model, you can use the `#[Transform]` and `#[Reformat]` attributes directly on your properties. This tells Strux exactly what to do when reading from or saving to the database.
-
-*   **`#[Transform]`**: Used to automatically cast complex database types. For example, automatically converting a JSON string from the database into a PHP Array!
-*   **`#[Reformat]`**: Used to change how a value looks in your app versus how it's saved in the database. You can pass global PHP functions (like `ucwords` or `password_hash`) OR custom method names from your class!
-
-#### Example: Password Hashing and Name Formatting
-```php
-use Strux\Component\Database\ORM\Attributes\Reformat;
-
-class User extends Model
-{
-    /**
-     * Whenever you set a password, Strux automatically runs it through
-     * password_hash() before saving it. No extra code needed!
-     */
-    #[Reformat(set: 'password_hash')]
-    public string $password;
-
-    /**
-     * Whenever you read this name, Strux automatically runs it through
-     * ucwords() to capitalize it.
-     */
-    #[Reformat(get: 'ucwords')]
-    public string $name;
-}
-```
-
-#### Example: Auto-Casting Arrays
-If you store a list of tags as JSON in the database, you can tell the model to automatically transform it into a usable PHP array for you!
+#### Method 2: Static Update
 
 ```php
-use Strux\Component\Database\ORM\Attributes\Transform;
-use Strux\Component\Database\ORM\Enums\DataType;
-
-class Post extends Model
-{
-    #[Transform(type: DataType::JSON)]
-    public array $tags;
-}
-```
-
-#### Example: Reformatting Prices
-If you store prices in cents (like `1999` for $19.99) but want to use them as floats in your code:
-
-```php
-use Strux\Component\Database\ORM\Attributes\Reformat;
-
-class Product extends Model
-{
-    /**
-     * get: Divides by 100 when reading from the database ($19.99)
-     * set: Multiplies by 100 when saving to the database (1999)
-     */
-    #[Reformat(get: 'divideBy100', set: 'multiplyBy100')]
-    public float $price;
-
-    public function divideBy100($value) { return $value / 100; }
-    public function multiplyBy100($value) { return $value * 100; }
-}
-```
-
-### The Classic Way: Accessors and Mutators
-If you prefer writing functions instead of using attributes, you can still use the classic approach:
-
-- **Mutators** filter data when it enters the model. (e.g. `setPasswordAttribute`)
-- **Accessors** filter data when it leaves the model. (e.g. `getNameAttribute`)
-
-```php
-class User extends Model
-{
-    public function setPasswordAttribute(string $value): void
-    {
-        $this->password = password_hash($value, PASSWORD_BCRYPT);
-    }
-
-    public function getNameAttribute(string $value): string
-    {
-        return ucwords($value);
-    }
-}
-```
-
----
-
-## 10. Auto-Validation: Your Database's Personal Bouncer
-
-One of the most powerful features of Strux Models is **Auto-Validation**. 
-
-You should never trust user input. If a user tries to sign up with a bad email or duplicate name, your model should stop them before saving bad data into your database.
-
-In Strux, we use the `#[Validate]` PHP Attribute to define rules right on the property.
-
-```php
-namespace App\Domain\Web\Entity;
-
-use Strux\Component\ORM\Model;
-use Strux\Component\ORM\Attributes\Validate;
-use Strux\Component\Database\Attributes\Column;
-
-class Brand extends Model
-{
-    #[Column]
-    #[Validate([
-        'required' => 'The brand name is required!',
-        'alpha'    => 'The brand name must only contain letters.',
-        'min:3'    => 'The brand name must be at least 3 characters long.'
-    ])]
-    public string $name;
-
-    #[Column]
-    #[Validate([
-        'required',
-        'unique:brands,slug' => 'Oops! This slug is already taken.'
-    ])]
-    public string $slug;
-}
-```
-
-### How Auto-Validation Works
-
-When you call `$model->save()`, the Strux ORM is incredibly smart. It stops right before talking to the database and says, *"Hold on, let me check the rules first."*
-
-It reads all the `#[Validate]` attributes you defined and runs the data through the Validator.
-
-- If the data is **valid**, it saves it to the database and returns `true`.
-- If the data is **invalid**, it safely aborts the save, returns `false`, and stores the errors inside the model!
-
-You can then grab those errors and show them to the user:
-
-```php
-$brand = new Brand();
-$brand->name = "A"; // Fails the min:3 rule!
-
-if ($brand->save()) {
-    echo "Saved successfully!";
-} else {
-    $errors = $brand->getErrors();
-    // $errors['name'] will contain: 'The brand name must be at least 3 characters long.'
-}
-```
-
-*(To learn how to easily display these errors on a webpage, check out the Forms documentation!)*
-
----
-
-## 11. Model Events & Lifecycle Hooks
-
-Models are very "chatty." Throughout their lifecycle, they constantly announce what they are doing. This allows you to "listen" to a model and perform actions automatically in the background.
-
-For example, maybe you want to automatically generate a slug when a `Post` is saved, or maybe you want to send an email when a `User` is created!
-
-### Internal Hooks: Automated Reactions
-
-Lifecycle hooks are special methods inside your model that run automatically at key moments.
-
-Imagine you're building a blog. When you save a post titled "Hello World," you want the URL to automatically become `/post/hello-world`. You can do this in the `beforeSave` hook directly inside the model:
-
-```php
-protected function beforeSave(): void
-{
-    // If the slug is empty, generate it from the title!
-    if (empty($this->slug)) {
-        $this->slug = strtolower(str_replace(' ', '-', $this->title));
-    }
-}
-```
-
-**List of Internal Hooks:**
-*   `beforeSave` / `afterSave`: Runs every time the record is saved.
-*   `beforeCreate` / `afterCreate`: Runs only when a **new** record is born.
-*   `beforeUpdate` / `afterUpdate`: Runs only when an **existing** record is changed.
-*   `beforeDelete` / `afterDelete`: Runs when a record is being removed.
-
-### External Events: The 11 Lifecycle Events
-
-If you want to decouple your logic (e.g., sending emails) away from the Model class, Strux fires 11 distinct Event objects that you can listen to anywhere in your application:
-
-*   **`Retrieved`**: Fired exactly when a model is pulled from the database and hydrated.
-*   **`Creating` / `Created`**: Fired *before* and *after* a brand new record is inserted.
-*   **`Updating` / `Updated`**: Fired *before* and *after* an existing record is updated.
-*   **`Saving` / `Saved`**: Fired *before* and *after* **both** creates and updates. (This is the most common event to listen to!)
-*   **`Deleting` / `Deleted`**: Fired *before* and *after* a model is deleted.
-*   **`Restoring` / `Restored`**: Fired *before* and *after* a soft-deleted model is restored.
-
-### Canceling Operations
-
-All of the **"before"** events (`Creating`, `Updating`, `Saving`, `Deleting`, `Restoring`) are special. They are **Cancelable**.
-
-If your external listener decides that the operation should not happen, it can call `$event->cancel()`. The ORM will immediately halt the database operation and return `false`.
-
-```php
-use Strux\Component\Events\Attributes\Listener;
-use Strux\Component\ORM\Events\Saving;
-
-class PreventAdminTampering 
-{
-    #[Listener(event: Saving::class)]
-    public function handle(Saving $event): void
-    {
-        if ($event->model instanceof User && $event->model->email === 'admin@system.com') {
-            // STOP! Do not let anyone modify the super admin!
-            $event->cancel();
-        }
-    }
-}
-```
-
-### Disabling Events Globally
-
-Sometimes, you *don't* want models to be chatty. 
-
-Imagine you are writing a massive data import script that creates 10,000 products at once. If every single product fires a `Saving` and `Created` event, your application might try to send 10,000 emails or clear the cache 10,000 times! That would destroy your server's performance.
-
-Strux provides a beautifully fluent API to temporarily silence these events. 
-
-You can put this configuration in your application's bootstrap file or import script:
-
-```php
-use Strux\Component\ORM\Model;
-use Strux\Component\ORM\Events\Retrieved;
-
-// Disable a specific, noisy event globally
-Model::disableEvents()->only([
-    Retrieved::class
+$user = User::update(1, [
+    'email' => 'newemail@example.com',
+    'active' => false,
 ]);
+```
 
-// Or, disable absolutely everything (Great for bulk imports!)
-Model::disableEvents()->all();
+> [!NOTE]
+> `User::update()` returns the updated model, or `null` if the record was not found.
 
-// You can always turn them back on later!
-Model::enableAllEvents();
+### Deleting Records
+
+#### Delete a Single Model
+
+```php
+$user = User::find(1);
+$user->delete(); // Returns true if deleted, false otherwise
+```
+
+#### Delete by ID (Static)
+
+```php
+User::destroy(1);        // Delete a single record
+User::destroy([1, 2, 3]); // Delete multiple records
+```
+
+The `destroy()` method:
+- Returns the number of deleted records.
+- Works with both single IDs and arrays of IDs.
+- For composite primary keys, pass arrays of key-value pairs.
+
+---
+
+## 3. How `save()` Works — The Full Journey
+
+When you call `save()`, the ORM goes through a carefully orchestrated sequence of steps:
+
+### For a New Record (INSERT)
+
+```
+1. beforeSave() hook fires
+2. Validation runs (if rules are defined)
+3. Saving event fires (cancelable)
+4. Timestamps are handled (created_at / updated_at)
+5. Creating event fires (cancelable)
+6. Properties are prepared for the database:
+   - Booleans become 1 or 0
+   - Arrays become JSON strings
+   - DateTime objects become formatted strings
+7. Auto-generated IDs are created (UUID/ULID if configured)
+8. SQL INSERT is executed
+9. Last insert ID is captured
+10. _exists flag is set to true
+11. Original state is saved for dirty tracking
+12. Created event fires
+13. Saved event fires
+14. afterCreate() hook fires
+15. afterSave() hook fires
+```
+
+### For an Existing Record (UPDATE)
+
+```
+1. beforeSave() hook fires
+2. Validation runs (if rules are defined)
+3. Saving event fires (cancelable)
+4. Timestamps are handled (updated_at)
+5. Properties are compared to original state (dirty checking)
+6. If nothing changed -> returns true immediately (no query)
+7. Updating event fires (cancelable)
+8. Only changed columns are included in the UPDATE
+9. SQL UPDATE is executed
+10. Original state is refreshed
+11. Updated event fires
+12. Saved event fires
+13. afterUpdate() hook fires
+14. afterSave() hook fires
+```
+
+> [!IMPORTANT]
+> Step 6 is a major performance feature. If you call `$user->save()` without changing anything, NO database query is executed. This makes it safe to call `save()` in loops or after conditional modifications.
+
+---
+
+## 4. Dirty State Tracking
+
+Your models "remember" their original state — the values they had when they were loaded from the database. This is called **Dirty Tracking**.
+
+```php
+$user = User::find(1);
+
+// Nothing has changed yet
+if ($user->isDirty()) {
+    echo "This will NOT execute.";
+}
+
+$user->email = 'changed@example.com';
+
+// Something changed!
+if ($user->isDirty()) {
+    echo "Something has been modified!";
+}
+
+// Check a specific property
+if ($user->isDirty('email')) {
+    echo "The email was changed!";
+}
+
+// Get the original value
+$oldEmail = $user->getOriginal('email'); // Returns the value before modification
+
+// Get all original values
+$originals = $user->getOriginal(); // Returns array of all original values
+
+// Get only the changes
+$changes = $user->getChanges(); // Returns ['email' => 'changed@example.com']
+```
+
+### Practical Uses for Dirty Tracking
+
+#### Conditional Logic
+
+```php
+$user = User::find(1);
+$user->status = 'active';
+
+if ($user->isDirty('status')) {
+    $oldStatus = $user->getOriginal('status');
+    sendStatusChangeEmail($user, $oldStatus, 'active');
+}
+
+$user->save();
+```
+
+#### Audit Logging
+
+```php
+foreach ($user->getChanges() as $field => $newValue) {
+    $oldValue = $user->getOriginal($field);
+    AuditLog::create([
+        'model' => 'User',
+        'model_id' => $user->id,
+        'field' => $field,
+        'old_value' => $oldValue,
+        'new_value' => $newValue,
+    ]);
+}
 ```
 
 ---
 
-## 12. Local Query Scopes: Reusable Logic
+## 5. Serialization: Converting Models to Arrays and JSON
 
-Scopes allow you to save a "shortcut" for common database filters. 
+Models can be easily converted to arrays or JSON for APIs and frontend consumption.
 
-Instead of writing `->where('active', 1)->where('role', 'admin')` ten times in your application, you can define a scope!
-
-### Defining the Shortcut
-Just prefix a method with `scope`:
+### toArray()
 
 ```php
+$user = User::find(1);
+$array = $user->toArray();
+// Returns: ['id' => 1, 'email' => 'john@example.com', 'active' => true]
+```
+
+### toJson()
+
+```php
+$user = User::find(1);
+$json = $user->toJson(); // Returns a JSON string
+$prettyJson = $user->toJson(JSON_PRETTY_PRINT); // Formatted JSON
+```
+
+### Collection Serialization
+
+```php
+$users = User::all();
+$array = $users->toArray(); // Array of arrays
+$json = json_encode($users); // Works because Collection implements JsonSerializable
+```
+
+### Hiding Fields from Serialization
+
+Sometimes you want to exclude certain fields from serialization (like passwords).
+
+#### Using the `#[Hidden]` Attribute
+
+```php
+use Strux\Component\Database\ORM\Attributes\Hidden;
+
 class User extends Model
 {
-    public function scopeActive($query)
-    {
-        $query->where('active', 1);
-    }
+    #[Column(type: Field::string)]
+    #[Hidden] // This field will NOT appear in toArray() or toJson()
+    public string $password;
 }
 ```
 
-### Using the Shortcut
-Now you can call it just like a regular framework method:
+#### Runtime Hiding
 
 ```php
-$allActiveUsers = User::active()->get();
-```
+$user = User::find(1);
 
----
+// Hide fields dynamically
+$user->hide(['password', 'secret_key']);
 
-## 13. Relationships: The "Ownership" Theme
-
-Databases are rarely just isolated tables; they are connected! A `Brand` has many `Products`. A `Product` belongs to a `Category`.
-
-In Strux, we use a highly descriptive **"Ownership"** naming convention to define how your models are connected instead of confusing names like `belongsTo`. This makes it instantly obvious how your database tables link together.
-
-### Relationship Types
-
-There are four main relationship attributes:
-
-1.  **`#[OwnsOne]`**: This model is the "parent" and holds exactly one "child" record. (The child table holds the foreign key).
-2.  **`#[OwnsMany]`**: This model is the "parent" and holds multiple "child" records. (The child table holds the foreign key).
-3.  **`#[OwnedBy]`**: This model is the "child". **It holds the foreign key** that points to a parent.
-4.  **`#[OwnedByMany]`**: A Many-to-Many relationship using a pivot table.
-
-### Example: Brand and Product
-
-Let's look at a `Brand` and a `Product`:
-
-```php
-use Strux\Component\ORM\Attributes\OwnsMany;
-use Strux\Component\ORM\Attributes\OwnedBy;
-
-class Brand extends Model
-{
-    // A Brand owns many products. 
-    // Strux will look for `brandId` on the products table!
-    #[OwnsMany(Product::class, 'brandId', 'id')]
-    public Collection $products;
-}
-
-class Product extends Model
-{
-    // A Product is owned by a Brand. 
-    // This means the `products` table has a `brandId` column!
-    #[OwnedBy(Brand::class, 'brandId', 'id')]
-    public Brand $brand;
-}
-```
-
-Once defined, you can magically access these relationships as if they were simple properties:
-```php
-$brand = Brand::find(1);
-
-// Get all products for this brand!
-foreach ($brand->products as $product) {
-    echo $product->title;
-}
-```
-
-### Eager Loading with Closures
-
-You can even filter your relationships while you are loading them!
-
-```php
-// "Get the brand, but only include products that are currently active."
-$brand = Brand::include([
-    'products' => function($query) {
-        $query->where('active', 1);
-    }
-])->first();
-```
-
----
-
-## 14. Database Transactions: The Safety Net
-
-What if you're processing an order? You need to:
-1. Create the Order.
-2. Subtract stock from the Product.
-3. Charge the Customer's credit card.
-
-If the credit card charge fails, you **must not** save the Order or subtract the stock. This is where **Transactions** come in. They ensure that either *everything* works, or *nothing* happens.
-
-```php
-use Strux\Component\ORM\Model;
-
-// The Callback Approach (Safest)
-Model::transaction(function() {
-    // Everything inside this function is protected!
-    $order = Order::create([...]);
-    $product->subtractStock(5);
-    $payment->charge();
-    
-    // If an error happens anywhere here, the Order is automatically deleted!
+// Or hide conditionally
+$user->hide(['email'], function () {
+    return !currentUser()->isAdmin();
 });
+
+// Show hidden fields again
+$user->unhide(['password']);
+
+$array = $user->toArray(); // Hidden fields excluded
 ```
 
-### Nested Transactions (Savepoints)
+> [!TIP]
+> `hide()` and `unhide()` also work on Collections: `$users->hide(['password'])` hides the field on every model in the collection.
 
-Strux fully supports **Nested Transactions**. If you call `Model::transaction()` or `Model::beginTransaction()` while another transaction is already active, Strux will automatically create a database `SAVEPOINT`. This allows the inner transaction to fail and rollback to the savepoint without aborting the entire parent transaction.
+---
+
+## 6. The `getAttribute()` Method
+
+Access individual attributes safely, falling back to the original state if the property is not publicly accessible:
 
 ```php
-Model::transaction(function() {
-    $order = Order::create([...]);
-    
-    try {
-        Model::transaction(function() {
-            // If this fails, it rolls back to the savepoint!
-            // The $order above is still safe and uncommitted.
-            $product->subtractStock(5);
+$user = User::find(1);
+
+// Direct property access (fastest)
+$email = $user->email;
+
+// Via getAttribute() (works for original values too)
+$email = $user->getAttribute('email');
+
+// Get original state
+$original = $user->getOriginal();
+$originalEmail = $user->getOriginal('email');
+```
+
+---
+
+## 7. Model State: `exists()` and `isNew()`
+
+Check whether a model exists in the database:
+
+```php
+$user = new User();
+$user->isNew();  // true - never been saved
+$user->exists(); // false - not in the database
+
+$user->save();
+
+$user->isNew();  // false
+$user->exists(); // true - now in the database
+
+$savedUser = User::find(1);
+$savedUser->isNew();  // false
+$savedUser->exists(); // true
+```
+
+---
+
+## 8. Table Name and Primary Key Resolution
+
+### How the Table Name is Determined
+
+```php
+// Explicit table name via #[Entity]
+#[Entity(table: 'custom_table_name')]
+class User extends Model {}
+
+// Or auto-generated from the class name
+class BlogPost extends Model {}  // Table name: 'blog_posts'
+```
+
+The auto-generation rule:
+1. Take the short class name (e.g., `BlogPost`).
+2. Convert from PascalCase to snake_case: `blog_post`.
+3. Add an "s" at the end: `blog_posts`.
+
+> [!WARNING]
+> Always check the auto-generated table name. Some irregular plurals might not match your expectations. When in doubt, specify the table name explicitly with `#[Entity(table: 'your_table')]`.
+
+### How the Primary Key is Determined
+
+The ORM scans all public properties for the `#[Id]` attribute:
+
+```php
+// Single primary key
+#[Id, Column(type: Field::integer)]
+public ?int $id = null;
+
+// Multiple primary keys (composite key)
+#[Id, Column(type: Field::integer)]
+public ?int $orderId = null;
+
+#[Id, Column(type: Field::integer)]
+public ?int $productId = null;
+```
+
+If no property has `#[Id]`, the ORM assumes a column named `id`.
+
+> [!TIP]
+> You can check if a model uses composite keys: `$user->isCompositeKey()` returns `true` or `false`.
+
+---
+
+## 9. Timestamps
+
+The `HasTimestamps` trait provides automatic `created_at` and `updated_at` handling.
+
+### Enabling Timestamps
+
+You need three things for timestamps to work:
+
+1. The `#[Timestamps]` attribute on the class (for the migration engine).
+2. Columns with `currentTimestamp` and/or `onUpdateCurrentTimestamp` (for the database schema).
+3. The `HasTimestamps` trait is used by Model automatically (it is in the `use` statement of the Model class).
+
+```php
+use Strux\Component\Database\ORM\Behavior\HasTimestamps;
+use Strux\Component\Database\Schema\Attributes\Column;
+use Strux\Component\Database\Schema\Attributes\Timestamps;
+use Strux\Component\Database\Schema\Types\Field;
+
+#[Timestamps(enabled: true)]
+class User extends Model
+{
+    // The 'createdAt' column
+    #[Column(type: Field::datetime, currentTimestamp: true)]
+    public ?string $createdAt = null;
+
+    // The 'updatedAt' column
+    #[Column(type: Field::datetime, onUpdateCurrentTimestamp: true)]
+    public ?string $updatedAt = null;
+}
+```
+
+### How Timestamps Work
+
+1. When `save()` is called, `handleTimestamps()` is invoked.
+2. For new records (`_exists === false`), it removes null `createdAt` values from the attributes so the database can use its default (`currentTimestamp`).
+3. For all saves, it removes null `updatedAt` values so the database can update them via `onUpdateCurrentTimestamp`.
+
+> [!NOTE]
+> Timestamps are primarily handled at the **database level** using `CURRENT_TIMESTAMP` defaults. The ORM simply strips null values so the database defaults kick in. This means timestamps work correctly even if you bypass the ORM and insert data directly.
+
+### Custom Timestamp Column Names
+
+```php
+#[Timestamps(
+    createdAt: 'registered_at',
+    updatedAt: 'modified_at'
+)]
+class User extends Model
+{
+    #[Column(type: Field::datetime, currentTimestamp: true)]
+    public ?string $registeredAt = null;
+
+    #[Column(type: Field::datetime, onUpdateCurrentTimestamp: true)]
+    public ?string $modifiedAt = null;
+}
+```
+
+### Checking if Timestamps are Enabled
+
+```php
+// These methods are available if you want to inspect the configuration
+$hasTimestamps = $user->hasTimestamps();       // Returns true/false
+$createdAtCol  = $user->getCreatedAtColumn();  // Returns column name or null
+$updatedAtCol  = $user->getUpdatedAtColumn();  // Returns column name or null
+```
+
+---
+
+## 10. Global Scopes
+
+Global scopes add constraints to ALL queries on a model. They are like "always-on" filters.
+
+### Adding a Global Scope
+
+```php
+use Strux\Component\Database\ORM\Model;
+
+class User extends Model
+{
+    // This method is called during initialization
+    public function initializeHasQueryBuilder(): void
+    {
+        static::addGlobalScope('active_users', function (Model $builder) {
+            $builder->where('active', 1);
         });
-    } catch (\Throwable $e) {
-        // Handle inner transaction failure
-    }
-});
-```
-
----
-
-## 15. Entity Builders: Generating Seed Data
-
-If you need to quickly generate thousands of models for automated testing or database seeding, you can use **EntityBuilders** (commonly known as Model Factories).
-
-### Creating a Builder
-
-Create a class extending `EntityBuilder` to define the default state for a Model:
-
-```php
-use App\Domain\Identity\Entity\User;
-use Strux\Component\Database\ORM\EntityBuilder;
-
-class UserBuilder extends EntityBuilder
-{
-    protected string $model = User::class;
-
-    public function definition(): array
-    {
-        return [
-            'email' => 'test_' . uniqid() . '@example.com',
-            'active' => true,
-        ];
     }
 }
 ```
 
-### Using Builders
-
-Once defined, you can quickly spin up models or collections of models and persist them immediately.
+Now every query on the User model automatically includes `WHERE active = 1`:
 
 ```php
-// Create a single User without saving to DB
-$user = UserBuilder::new()->make(['active' => false]);
+$users = User::all(); // SELECT * FROM users WHERE active = 1
+```
 
-// Create 10 Users and instantly save them to the DB
-$users = UserBuilder::new()->count(10)->create();
+### How Global Scopes are Applied
+
+1. When you call `User::query()`, a new query builder instance is created.
+2. During initialization, `applyGlobalScopes()` is called on the model instance.
+3. All registered global scopes are applied to the query.
+4. Every query — `get()`, `first()`, `count()`, `update()`, `delete()` — automatically includes the scope constraints.
+
+### Removing a Global Scope
+
+```php
+// Remove for a single query
+$users = User::query()->withoutGlobalScope('active_users')->get();
+
+// Includes inactive users now
+```
+
+### The Soft Deletes Global Scope
+
+The `HasSoftDeletes` trait automatically adds a global scope:
+
+```php
+// The SoftDelete trait adds this scope automatically:
+protected function initializeHasSoftDeletes(): void
+{
+    static::addGlobalScope('softDeletes', function (Model $builder) {
+        $column = $builder->getSoftDeleteColumn();
+        $builder->where($column, 'IS NULL');
+    });
+}
+```
+
+This means all queries automatically exclude soft-deleted records.
+
+> [!TIP]
+> Global scopes are stored per model class. Different models can have different global scopes without interfering with each other.
+
+---
+
+## 11. Lazy Loading Prevention
+
+By default, models will automatically lazy-load relationships when you access them as properties. You can prevent this and force explicit eager loading:
+
+```php
+// Globally prevent lazy loading (useful in development to catch N+1 queries)
+User::preventLazyLoading(true);
+
+// Now accessing an unloaded relationship throws a LazyLoadingViolationException
+$user = User::find(1);
+$roles = $user->roles; // Throws LazyLoadingViolationException!
+```
+
+> [!TIP]
+> Enable `preventLazyLoading()` in your development environment to catch N+1 query issues early. Disable it in production for the normal lazy loading behavior.
+
+---
+
+## 12. Model Lifecycle Summary
+
+Here is the complete lifecycle of a model from creation to deletion:
+
+```
+  new Model()
+      |
+      v
+  resolveConnection()  -> Get PDO from container
+      |
+      v
+  bootTraits()         -> Run initialize[TraitName]() methods
+      |
+      v
+  fill(attributes)     -> Set properties, apply transforms
+      |
+      v
+  save()
+      |
+      +-- beforeSave() hook
+      +-- validate() -> Runs #[Validate] rules
+      +-- Saving event (cancelable)
+      +-- handleTimestamps()
+      |
+      +-- [NEW] _performInsert()
+      |     +-- Creating event (cancelable)
+      |     +-- Generate UUID/ULID if needed
+      |     +-- Execute INSERT
+      |     +-- Capture lastInsertId
+      |     +-- Set _exists = true
+      |     +-- Created event
+      |
+      +-- [EXISTING] _performUpdate()
+      |     +-- Check dirty state
+      |     +-- If clean, skip (no query!)
+      |     +-- Updating event (cancelable)
+      |     +-- Execute UPDATE (only changed columns)
+      |     +-- Updated event
+      |
+      +-- Save original state
+      +-- Saved event
+      +-- afterSave() hook
 ```
 
 ---
 
-## Summary Best Practices
+## 13. Complete Model Method Reference
 
-To become a Strux Master, follow these simple rules:
+### Static Methods
 
-1.  **Trust Your Model:** Let your model handle validation using `#[Validate]`. Don't let bad data into your spreadsheet!
-2.  **Use Scopes:** If you find yourself writing the same `where()` clause twice, turn it into a `scope`.
-3.  **Use Hooks for Automation:** Use `beforeSave` to handle timestamps or slugs so your Controllers stay simple.
-4.  **Bulk is King:** If you're importing data, use `::insert()` or `::upsert()`. Your server will thank you.
-5.  **Include Early:** Use `::include()` to avoid the "N+1" problem where your app makes too many trips to the database.
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `query()` | `static::query(): Model` | Returns a new query builder instance |
+| `create()` | `static::create(array $attributes): static` | Creates and saves a new model |
+| `update()` | `static::update(mixed $id, array $attributes): ?static` | Finds and updates a record |
+| `find()` | `static::find(mixed $id): ?static` | Finds by primary key |
+| `findOrFail()` | `static::findOrFail(mixed $id): static` | Finds by PK, throws if not found |
+| `all()` | `static::all(): Collection` | Returns all records |
+| `destroy()` | `static::destroy(mixed $ids): int` | Deletes by primary key(s) |
+| `transaction()` | `static::transaction(Closure $callback): mixed` | Runs a closure in a transaction |
+| `beginTransaction()` | `static::beginTransaction(): void` | Starts a transaction |
+| `commit()` | `static::commit(): void` | Commits a transaction |
+| `rollBack()` | `static::rollBack(): void` | Rolls back a transaction |
+| `preventLazyLoading()` | `static::preventLazyLoading(bool $prevent): void` | Enables/disables lazy loading |
+| `disableEvents()` | `static::disableEvents(): EventDisabler` | Returns an event disabler configurator |
+| `enableAllEvents()` | `static::enableAllEvents(): void` | Re-enables all events |
+| `fromStorage()` | `static::fromStorage(array $data): static` | Creates a model from database data |
 
-Happy coding with the Strux ORM!
+### Instance Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `save()` | `save(): bool` | Persists the model to the database |
+| `delete()` | `delete(): bool` | Deletes the model from the database |
+| `fill()` | `fill(array $attributes): static` | Sets attributes from an array |
+| `exists()` | `exists(): bool` | Checks if the model exists in the database |
+| `isNew()` | `isNew(): bool` | Checks if the model has never been saved |
+| `getAttribute()` | `getAttribute(string $key): mixed` | Gets an attribute by name |
+| `getOriginal()` | `getOriginal(?string $key): mixed` | Gets the original (unmodified) value |
+| `isDirty()` | `isDirty(?string $key): bool` | Checks if attributes have been modified |
+| `getChanges()` | `getChanges(): array` | Returns all modified attributes |
+| `hide()` | `hide(array $fields, ?callable $condition): static` | Hides fields from serialization |
+| `unhide()` | `unhide(array $fields, ?callable $condition): static` | Shows hidden fields |
+| `toArray()` | `toArray(): array` | Converts the model to an array |
+| `toJson()` | `toJson(int $options): string` | Converts the model to JSON |
+| `getTable()` | `getTable(): string` | Returns the table name |
+| `getPrimaryKey()` | `getPrimaryKey(): string` | Returns the primary key name |
+| `getPrimaryKeys()` | `getPrimaryKeys(): array` | Returns all primary key names |
+| `isCompositeKey()` | `isCompositeKey(): bool` | Checks if the model uses composite keys |
+| `getLastInsertId()` | `getLastInsertId(?string $name): string\|false` | Gets the last inserted ID |
+| `removeOriginalKey()` | `removeOriginalKey(string $key): void` | Removes a key from original state |
+
+### Internal Lifecycle Hooks (override in your model)
+
+| Hook | Called During |
+|------|---------------|
+| `beforeSave()` | Before every save (create or update) |
+| `afterSave()` | After every save (create or update) |
+| `beforeCreate()` | Before a new record is inserted |
+| `afterCreate()` | After a new record is inserted |
+| `beforeUpdate()` | Before an existing record is updated |
+| `afterUpdate()` | After an existing record is updated |
+| `beforeDelete()` | Before a record is deleted |
+| `afterDelete()` | After a record is deleted |

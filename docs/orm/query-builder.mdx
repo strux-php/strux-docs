@@ -3,35 +3,128 @@ title: Query Builder
 sidebar_position: 3
 ---
 
-# Query Builder
+# Query Builder: Building SQL Queries in PHP
 
-Strux ORM provides a fluent, expressive query builder for constructing SQL queries safely.
+The Query Builder provides a fluent, expressive interface for constructing SQL queries. Instead of writing raw SQL strings, you chain methods together to build your query step by step.
 
-:::info
-All queries use **prepared statements** and automatic parameter binding.
-:::
+> [!INFO]
+> All queries use **prepared statements** with automatic parameter binding. This protects you from SQL injection attacks. You never need to manually escape values.
 
 ---
 
-## Getting a Query Builder
+## 1. Getting a Query Builder
+
+Every model provides a `query()` method that returns a query builder instance:
 
 ```php
 $query = User::query();
-````
+```
+
+You can also use the `__callStatic` magic method, which forwards static method calls to the query builder:
+
+```php
+// These are equivalent:
+$users = User::where('active', 1)->get();
+$users = User::query()->where('active', 1)->get();
+```
+
+> [!NOTE]
+> The query builder is actually the Model itself in a special "query mode." When you call `User::query()`, the ORM returns a fresh Model instance with the `_isQueryBuilderInstance` flag set to `true`. This is why the query builder has access to all the same infrastructure (connection, dialect, etc.).
 
 ---
 
-## Basic Wheres
+## 2. Select Basics
+
+### Selecting All Columns
 
 ```php
-$query->where('status', 'active');
-$query->where('priority', '>', 5);
-$query->whereIn('id', [1, 2, 3]);
+$users = User::query()->get();      // SELECT * FROM users
+$users = User::all();               // Same thing, shorthand
+```
+
+### Selecting Specific Columns
+
+```php
+$users = User::query()
+    ->select('id', 'email', 'name')
+    ->get();                        // SELECT id, email, name FROM users
+```
+
+### Select Raw Expression
+
+```php
+$counts = User::query()
+    ->selectRaw('COUNT(*) as total, status')
+    ->groupBy('status')
+    ->get();                        // SELECT COUNT(*) as total, status FROM users GROUP BY status
+```
+
+### Distinct Results
+
+```php
+$countries = User::query()
+    ->distinct()
+    ->select('country')
+    ->get();                        // SELECT DISTINCT country FROM users
+```
+
+### Custom From Table
+
+```php
+$query = User::query()
+    ->from('users AS u');           // SELECT * FROM users AS u
 ```
 
 ---
 
-## Grouped Conditions
+## 3. WHERE Conditions
+
+### Basic Where
+
+```php
+$query->where('status', 'active');
+// WHERE status = 'active'
+
+$query->where('priority', '>', 5);
+// WHERE priority > 5
+
+$query->where('name', 'LIKE', '%john%');
+// WHERE name LIKE '%john%'
+```
+
+### Supported Operators
+
+You can use any valid SQL operator as the second parameter:
+
+| Operator | Example |
+|----------|---------|
+| `=` | `->where('id', '=', 1)` |
+| `!=` or `<>` | `->where('id', '!=', 1)` |
+| `>` | `->where('age', '>', 18)` |
+| `>=` | `->where('age', '>=', 18)` |
+| `<` | `->where('price', '<', 100)` |
+| `<=` | `->where('price', '<=', 100)` |
+| `LIKE` | `->where('name', 'LIKE', '%pattern%')` |
+| `NOT LIKE` | `->where('name', 'NOT LIKE', '%pattern%')` |
+| `IS NULL` | `->where('deleted_at', 'IS NULL')` |
+| `IS NOT NULL` | `->where('deleted_at', 'IS NOT NULL')` |
+
+> [!TIP]
+> For `IS NULL` and `IS NOT NULL`, you pass the operator as the second parameter with no value for the third. Alternatively, you can use `->whereNull('column')` or `->whereNotNull('column')`.
+
+### Where Array
+
+You can pass an array of conditions:
+
+```php
+$query->where([
+    'status' => 'active',
+    'role' => 'admin',
+]);
+// WHERE status = 'active' AND role = 'admin'
+```
+
+### Where Closure (Grouped Conditions)
 
 ```php
 $query->where('department', 'Support')
@@ -39,11 +132,59 @@ $query->where('department', 'Support')
           $q->where('status', 'Open')
             ->orWhere('priority', 'Critical');
       });
+// WHERE department = 'Support' AND (status = 'Open' OR priority = 'Critical')
 ```
+
+### Or Where
+
+```php
+$query->where('status', 'active')
+      ->orWhere('status', 'pending');
+// WHERE status = 'active' OR status = 'pending'
+```
+
+### Where Not
+
+```php
+$query->whereNot('status', 'banned');
+// WHERE NOT status = 'banned'
+
+$query->orWhereNot('status', 'banned');
+// OR NOT status = 'banned'
+```
+
+### Where In / Where Not In
+
+```php
+$query->whereIn('id', [1, 2, 3]);
+// WHERE id IN (1, 2, 3)
+
+$query->whereNotIn('id', [1, 2, 3]);
+// WHERE id NOT IN (1, 2, 3)
+```
+
+### Where Raw
+
+For completely custom SQL conditions:
+
+```php
+$query->whereRaw('YEAR(created_at) = ?', [2024]);
+// WHERE YEAR(created_at) = 2024
+
+$query->orWhereRaw('TIMESTAMPDIFF(YEAR, birth_date, CURDATE()) >= 18');
+// OR (raw SQL condition)
+```
+
+> [!CAUTION]
+> Be careful with `whereRaw()`. It does NOT escape identifiers, only binds parameters. Never pass user input directly into the SQL string itself — always use `?` placeholders.
 
 ---
 
-## Convenience Methods
+## 4. Advanced Where Helpers
+
+### whereAny (OR Across Multiple Columns)
+
+Search for a value across multiple columns:
 
 ```php
 $query->whereAny(
@@ -51,153 +192,535 @@ $query->whereAny(
     'LIKE',
     '%urgent%'
 );
+// WHERE (subject LIKE '%urgent%' OR description LIKE '%urgent%')
 ```
 
-Case-sensitive LIKE:
+### whereAll (AND Across Multiple Columns)
+
+```php
+$query->whereAll(
+    ['firstname', 'lastname'],
+    'LIKE',
+    'john%'
+);
+// WHERE (firstname LIKE 'john%' AND lastname LIKE 'john%')
+```
+
+### whereLike / orWhereLike
+
+Case-sensitive LIKE queries:
 
 ```php
 $query->whereLike('license_code', 'ABC-123', caseSensitive: true);
+// WHERE license_code LIKE BINARY 'ABC-123'
+
+$query->orWhereLike('code', 'XYZ');
+```
+
+### whereNotLike / orWhereNotLike
+
+```php
+$query->whereNotLike('status', 'completed');
+$query->orWhereNotLike('status', 'archived');
 ```
 
 ---
 
-## Subqueries
+## 5. Subqueries
+
+### Where with Subquery
 
 ```php
 $query->where('priority', '>', function ($sub) {
     $sub->selectRaw('AVG(priority)')
         ->from('tickets');
 });
+// WHERE priority > (SELECT AVG(priority) FROM tickets)
+```
+
+### Where In with Subquery
+
+```php
+$query->whereIn('user_id', function ($sub) {
+    $sub->select('id')->from('users')->where('active', 1);
+});
+// WHERE user_id IN (SELECT id FROM users WHERE active = 1)
 ```
 
 ---
 
-## Raw Expressions
+## 6. Joins
+
+### Inner Join
 
 ```php
-$query->selectRaw('count(*) as count, status')
-      ->groupBy('status')
-      ->whereRaw('created_at > ?', ['2023-01-01']);
+$query->join('orders', 'users.id', '=', 'orders.user_id');
+// INNER JOIN orders ON users.id = orders.user_id
+```
+
+### Left Join
+
+```php
+$query->leftJoin('profiles', 'users.id', '=', 'profiles.user_id');
+// LEFT JOIN profiles ON users.id = profiles.user_id
+```
+
+### Right Join
+
+```php
+$query->rightJoin('categories', 'products.category_id', '=', 'categories.id');
+// RIGHT JOIN categories ON products.category_id = categories.id
+```
+
+### Joining with Multiple Conditions
+
+```php
+$query->join('order_items', function ($join) {
+    $join->on('orders.id', '=', 'order_items.order_id')
+         ->where('order_items.quantity', '>', 0);
+});
 ```
 
 ---
 
----
+## 7. Ordering, Grouping, and Having
 
-## Executing Queries
+### Order By
 
 ```php
-$results = $query->get();
-$first   = $query->first();
-$exists  = $query->exists();
+$query->orderBy('name', 'ASC');
+$query->orderBy('created_at', 'DESC');
+
+// Multiple order by clauses
+$query->orderBy('status', 'ASC')
+      ->orderBy('created_at', 'DESC');
+```
+
+### Latest / Oldest
+
+Convenience methods for common ordering:
+
+```php
+$users = User::latest()->get();  // ORDER BY created_at DESC
+$users = User::oldest()->get();  // ORDER BY created_at ASC
+```
+
+> [!NOTE]
+> `latest()` and `oldest()` are shortcuts for `->orderBy('created_at', 'DESC')` and `->orderBy('created_at', 'ASC')` respectively.
+
+### Group By
+
+```php
+$query->selectRaw('COUNT(*) as count, status')
+      ->groupBy('status');
+```
+
+### Having
+
+```php
+$query->selectRaw('COUNT(*) as count, department')
+      ->groupBy('department')
+      ->having('count', '>', 5);
+// HAVING count > 5
 ```
 
 ---
 
-## Query Caching (The "Stash" API)
+## 8. Limit and Offset
 
-Sometimes, reading from the database can be slow, especially for complex queries. Strux provides a built-in memory system called the **Stash API**. Think of it as a photographic memory for your queries.
-
-Instead of hitting the database every time, the ORM saves the results in memory (like a quick-access filing cabinet).
-
-### The Automatic Way: `#[Stash]`
-You can tell an entire Model to always remember its answers by adding the `#[Stash]` attribute.
+### Take (Limit)
 
 ```php
-use Strux\Component\Database\ORM\Attributes\Stash;
+$query->take(10);  // LIMIT 10
+```
 
-// Stash ALL queries for this Model for 60 seconds
-#[Stash(ttl: 60)]
-class Setting extends Model 
-{
+### Skip (Offset)
+
+```php
+$query->skip(20);  // OFFSET 20
+```
+
+### Combined (for Pagination)
+
+```php
+$query->skip(0)->take(10);   // LIMIT 10 OFFSET 0  (page 1)
+$query->skip(10)->take(10);  // LIMIT 10 OFFSET 10 (page 2)
+$query->skip(20)->take(10);  // LIMIT 10 OFFSET 20 (page 3)
+```
+
+---
+
+## 9. Executing Queries
+
+### Get Results
+
+```php
+$users = $query->get();     // Returns a Collection of all matching models
+```
+
+### Get First Result
+
+```php
+$user = $query->first();    // Returns a single model or null
+```
+
+### Get Last Result
+
+```php
+$user = $query->last();     // Ordered by primary key DESC, returns single model or null
+```
+
+### Check if Any Records Exist
+
+```php
+if ($query->exists()) {
+    echo "Records found!";
 }
-
-// Controller usage (Automatically cached, no extra code needed!):
-$settings = Setting::all(); 
 ```
 
-### The Manual Way: `stashFor()`
-If you only want to cache one specific query, use `stashFor()` directly on the query builder:
+### Find by Primary Key
 
 ```php
-// Stash this specific query for 1 hour (3600 seconds)
-$popularProducts = Product::where('views', '>', 1000)
-    ->stashFor(3600, 'popular_products')
-    ->get();
+$user = User::find(1);                     // Single key
+$user = User::find([1, 2, 3]);            // Multiple keys
+$item = OrderItem::find(['orderId' => 1, 'productId' => 5]);  // Composite key
 ```
 
-### Invalidating the Stash
-If a product's views change, you need to clear the memory so the database is checked again:
+### Find or Fail
 
 ```php
-Product::dropStash('popular_products');
+$user = User::findOrFail(1);   // Returns model or throws RuntimeException
+```
+
+### Get All Records
+
+```php
+$users = User::all();   // SELECT * FROM users
 ```
 
 ---
 
-## Multiple Database Support (Agnosticism)
+## 10. Aggregates
 
-Strux is completely **Database Agnostic**. This means the ORM doesn't care if you're using MySQL, PostgreSQL, SQLite, Microsoft SQL Server, or Oracle. It automatically translates your PHP code into the correct "dialect" for your specific database.
+### Count
 
-You can configure your active database in `src/Config/Database.php`. The Query Builder will automatically detect the active `PDO` driver and seamlessly route the query generation behind the scenes.
+```php
+$count = User::query()->count();            // Total count
+$active = User::where('active', 1)->count(); // Count with condition
+```
+
+### Max / Min
+
+```php
+$maxPrice = Product::query()->max('price');
+$minPrice = Product::query()->min('price');
+```
+
+### Average
+
+```php
+$average = Product::query()->avg('price');
+```
+
+### Sum
+
+```php
+$total = Order::query()->sum('total_amount');
+```
 
 ---
 
-## Dialect-Agnostic Upserts
+## 11. Bulk Operations
 
-You can easily perform "insert or update" (upsert) operations without worrying about the underlying database driver. Strux dynamically converts the query to the correct syntax (e.g., `ON DUPLICATE KEY UPDATE` for MySQL, `ON CONFLICT DO UPDATE` for Postgres/SQLite, and `MERGE` for SQL Server).
+### Insert Multiple Records
+
+Insert many records in a single query — much faster than looping and calling `save()`:
 
 ```php
-$query->upsert(
-    [
-        ['id' => 1, 'email' => 'a@test.com', 'name' => 'Alice'],
-        ['id' => 2, 'email' => 'b@test.com', 'name' => 'Bob'],
+User::insert([
+    ['email' => 'user1@test.com', 'active' => 1],
+    ['email' => 'user2@test.com', 'active' => 1],
+    ['email' => 'user3@test.com', 'active' => 0],
+]);
+```
+
+> [!TIP]
+> Use `insert()` when you need to import thousands of records. It sends all the data in ONE query instead of thousands of individual queries. However, it does NOT fire lifecycle events or auto-set timestamps.
+
+### Upsert (Insert or Update)
+
+Upsert tries to insert a record, but if a record with the same unique key already exists, it updates it instead:
+
+```php
+User::upsert(
+    values: [
+        ['email' => 'jane@example.com', 'name' => 'Jane Doe', 'active' => 0],
+        ['email' => 'john@example.com', 'name' => 'John Doe', 'active' => 1],
     ],
-    ['id'], // Columns to determine uniqueness
-    ['name'] // Columns to update on conflict
+    uniqueBy: ['email'],     // Column(s) to check for conflicts
+    update: ['name', 'active'] // Only these columns are updated on conflict
 );
 ```
 
+On MySQL, this generates:
+```sql
+INSERT INTO users (email, name, active) VALUES (...), (...)
+ON DUPLICATE KEY UPDATE name = VALUES(name), active = VALUES(active)
+```
+
+> [!WARNING]
+> The `upsert()` method requires a UNIQUE index on the columns specified in `uniqueBy`. Without a unique constraint, the database cannot detect conflicts and may create duplicate records.
+
+### Update Multiple Records
+
+```php
+// Update all matching records in one query
+User::query()
+    ->where('last_login', '<', '2024-01-01')
+    ->updateMany(['status' => 'inactive']);
+```
+
+> [!NOTE]
+> `updateMany()` updates ALL records matching the query conditions in a single SQL query. Unlike `save()` on individual models, it does NOT fire lifecycle events.
+
 ---
 
-## Processing Large Datasets
+## 12. Raw SQL Expressions
 
-When dealing with thousands of records, loading everything into memory via `get()` will cause memory exhaustion. Strux ORM provides memory-efficient chunking mechanisms.
+Sometimes you need to use SQL functions or expressions that don't have a dedicated method:
 
-### Using Generators (`stream`)
+### Using the Expression Class
 
-The `stream` method yields records one by one using a PHP Generator, fetching rows directly from the underlying PDO statement.
+```php
+use Strux\Component\Database\Expression;
+
+$query->where('created_at', '<', new Expression('NOW()'));
+$query->where('price', '>', new Expression('(SELECT AVG(price) FROM products)'));
+```
+
+> [!CAUTION]
+> Anything wrapped in `Expression` is inserted directly into the SQL without escaping. Only use it with trusted, hardcoded values.
+
+---
+
+## 13. Debugging Queries
+
+### See the SQL (with `?` placeholders)
+
+```php
+$sql = User::where('active', 1)
+    ->where('role', 'admin')
+    ->toSql();
+// SELECT * FROM users WHERE active = ? AND role = ?
+```
+
+### See the SQL with Bindings (Actual Values)
+
+```php
+$sql = User::where('active', 1)
+    ->where('role', 'admin')
+    ->toRawSql();
+// SELECT * FROM users WHERE active = 1 AND role = 'admin'
+```
+
+> [!TIP]
+> Use `toSql()` and `toRawSql()` during development to debug what your query builder is actually generating. They do NOT execute the query.
+
+### Get Query State
+
+```php
+$state = User::query()
+    ->where('active', 1)
+    ->take(10)
+    ->getQueryState();
+
+// Returns: [
+//     'action' => 'select',
+//     'selects' => ['*'],
+//     'from' => 'users',
+//     'wheres' => [...],
+//     'take' => 10,
+//     'skip' => null,
+//     'orders' => [],
+//     'groups' => [],
+//     'havings' => [],
+//     'joins' => [],
+//     'bindings' => [...],
+//     'distinct' => false,
+// ]
+```
+
+---
+
+## 14. Processing Large Datasets
+
+When you have thousands or millions of records, loading them all at once with `get()` will exhaust your server's memory. Strux provides three memory-efficient alternatives.
+
+### Stream (Generator)
+
+The `stream()` method yields records one-by-one using a PHP Generator. It fetches rows directly from the PDO statement without loading everything into memory:
 
 ```php
 foreach (User::query()->stream() as $user) {
-    // Process $user
+    // Only ONE model is in memory at a time
+    echo $user->email . "\n";
 }
 ```
 
-### Pagination with Limit/Offset (`batch`)
+> [!TIP]
+> Use `stream()` when you need to process every record (e.g., generating a report, sending emails, exporting data). It uses virtually no memory regardless of how many records there are.
 
-Process records in chunks of a specific size using `LIMIT` and `OFFSET`.
+### Batch (Limit/Offset Chunking)
+
+The `batch()` method processes records in chunks using `LIMIT` and `OFFSET`:
 
 ```php
 User::query()->batch(100, function ($users) {
+    // $users is a Collection of 100 models
     foreach ($users as $user) {
-        // ...
+        processUser($user);
     }
 });
 ```
 
-### Indexed Pagination (`batchByPrimaryKey`)
+> [!WARNING]
+> `batch()` uses `OFFSET`, which becomes slower on large tables. For tables with millions of rows, consider `batchByPrimaryKey()` instead.
 
-For large tables, `OFFSET` becomes slow. The `batchByPrimaryKey` method provides a highly performant way to chunk using the primary key index (e.g., `WHERE id > ? LIMIT ?`).
+### Batch by Primary Key (Indexed Chunking)
+
+For large tables, `OFFSET` is slow because the database still has to scan and skip rows. `batchByPrimaryKey()` uses the primary key index instead:
 
 ```php
 User::query()->batchByPrimaryKey(100, function ($users) {
-    // Process 100 users at a time without OFFSET penalty
+    // Uses WHERE id > ? LIMIT 100 — much faster on large tables!
+    foreach ($users as $user) {
+        processUser($user);
+    }
 });
 ```
 
+This generates queries like:
+```sql
+SELECT * FROM users WHERE id > 0 ORDER BY id LIMIT 100
+SELECT * FROM users WHERE id > 100 ORDER BY id LIMIT 100
+SELECT * FROM users WHERE id > 200 ORDER BY id LIMIT 100
+```
+
+> [!TIP]
+> `batchByPrimaryKey()` is the preferred method for processing large tables. It maintains consistent performance regardless of table size.
+
 ---
 
-## Performance Tips
+## 15. Query Builder Method Reference
 
-````
+### Basic Query Methods
+
+| Method | Description |
+|--------|-------------|
+| `query()` | Returns a new query builder instance |
+| `select(...$columns)` | Set the columns to select |
+| `selectRaw($expression)` | Add a raw SELECT expression |
+| `distinct()` | Add DISTINCT to the query |
+| `from($table)` | Set the FROM table |
+| `raw($value)` | Create a raw Expression |
+
+### Where Methods
+
+| Method | Description |
+|--------|-------------|
+| `where($column, $operator, $value)` | Add a WHERE clause |
+| `orWhere($column, $operator, $value)` | Add an OR WHERE clause |
+| `whereNot($column, $operator, $value)` | Add a WHERE NOT clause |
+| `orWhereNot($column, $operator, $value)` | Add an OR WHERE NOT clause |
+| `whereRaw($sql, $bindings)` | Add a raw WHERE clause |
+| `orWhereRaw($sql, $bindings)` | Add a raw OR WHERE clause |
+| `whereIn($column, $values)` | Add a WHERE IN clause |
+| `whereNotIn($column, $values)` | Add a WHERE NOT IN clause |
+| `whereAny($columns, $operator, $value)` | Match across multiple columns (OR) |
+| `whereAll($columns, $operator, $value)` | Match across multiple columns (AND) |
+| `whereLike($column, $pattern, $caseSensitive)` | CASE-sensitive LIKE |
+| `orWhereLike($column, $pattern, $caseSensitive)` | OR CASE-sensitive LIKE |
+| `whereNotLike($column, $pattern, $caseSensitive)` | NOT LIKE (case-sensitive) |
+| `orWhereNotLike($column, $pattern, $caseSensitive)` | OR NOT LIKE (case-sensitive) |
+
+### Join Methods
+
+| Method | Description |
+|--------|-------------|
+| `join($table, $first, $operator, $second)` | Inner join |
+| `leftJoin($table, $first, $operator, $second)` | Left join |
+| `rightJoin($table, $first, $operator, $second)` | Right join |
+
+### Ordering, Grouping, Having
+
+| Method | Description |
+|--------|-------------|
+| `orderBy($column, $direction)` | Add ORDER BY |
+| `latest($column)` | Order by column DESC (default: created_at) |
+| `oldest($column)` | Order by column ASC (default: created_at) |
+| `groupBy(...$columns)` | Add GROUP BY |
+| `having($column, $operator, $value)` | Add HAVING |
+| `take($count)` | Set LIMIT |
+| `skip($count)` | Set OFFSET |
+
+### Retrieval Methods
+
+| Method | Description |
+|--------|-------------|
+| `get()` | Execute query, return Collection |
+| `all()` | Get all records (no conditions) |
+| `first()` | Get first record or null |
+| `last()` | Get last record or null |
+| `find($id)` | Find by primary key |
+| `findOrFail($id)` | Find by PK or throw |
+| `exists()` | Check if any records match |
+
+### Aggregate Methods
+
+| Method | Description |
+|--------|-------------|
+| `count($column)` | Count results |
+| `max($column)` | Maximum value |
+| `min($column)` | Minimum value |
+| `avg($column)` | Average value |
+| `sum($column)` | Sum of values |
+
+### Bulk Methods
+
+| Method | Description |
+|--------|-------------|
+| `insert(array $values)` | Bulk insert |
+| `upsert(array $values, array $uniqueBy, array $update)` | Insert or update |
+| `updateMany(array $values)` | Bulk update |
+
+### Processing Methods
+
+| Method | Description |
+|--------|-------------|
+| `stream()` | Generator yielding one model at a time |
+| `batch($count, $callback)` | Chunked processing with limit/offset |
+| `batchByPrimaryKey($count, $callback)` | Chunked processing with indexed pagination |
+
+### Debugging Methods
+
+| Method | Description |
+|--------|-------------|
+| `toSql()` | Get SQL with `?` placeholders |
+| `toRawSql()` | Get SQL with actual values |
+| `getQueryState()` | Get full query state array |
+| `getWheresState()` | Get WHERE clauses only |
+
+### Caching Methods (Stash)
+
+| Method | Description |
+|--------|-------------|
+| `stashFor($seconds, $key)` | Cache results for N seconds |
+| `stashForever($key)` | Cache results permanently |
+| `dropStash($key)` | Invalidate cached results |
+
+### Global Scope Methods
+
+| Method | Description |
+|--------|-------------|
+| `withoutGlobalScope($scope)` | Remove a global scope |
+| `addGlobalScope($name, $callback)` | Add a global scope |

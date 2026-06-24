@@ -1,0 +1,394 @@
+---
+title: Model Events & Lifecycle
+sidebar_position: 4
+---
+
+# Model Events & Lifecycle Hooks
+
+Models are constantly announcing what they are doing throughout their lifecycle. You can "listen" to these announcements and perform actions automatically — like sending an email when a user registers, or generating a slug when a post is saved.
+
+Strux provides two ways to hook into the model lifecycle:
+1. **Internal Hooks** — Methods you override directly in your Model class.
+2. **External Events** — PSR-14 Event Dispatching that any listener can subscribe to.
+
+> [!INFO]
+> Strux uses the PSR-14 Event Dispatcher interface. If you have an event dispatcher registered in the container, model events will be dispatched through it automatically.
+
+---
+
+## 1. Internal Lifecycle Hooks
+
+These are methods you define directly in your Model class. They are called automatically at the appropriate times.
+
+### Available Hooks
+
+| Hook | Called When | Use Case |
+|------|-------------|----------|
+| `beforeSave()` | Before every save (create AND update) | Generate slugs, normalize data |
+| `afterSave()` | After every save (create AND update) | Clear cache, update counters |
+| `beforeCreate()` | Before a NEW record is inserted | Set default values, generate UUIDs |
+| `afterCreate()` | After a NEW record is inserted | Send welcome emails, create default settings |
+| `beforeUpdate()` | Before an EXISTING record is updated | Validate changes, log modifications |
+| `afterUpdate()` | After an EXISTING record is updated | Update search indexes, notify listeners |
+| `beforeDelete()` | Before a record is deleted | Check permissions, archive data |
+| `afterDelete()` | After a record is deleted | Clean up related data, log deletion |
+
+### Example: Auto-Generating Slugs
+
+```php
+class Post extends Model
+{
+    #[Column]
+    public string $title;
+
+    #[Column]
+    public string $slug;
+
+    protected function beforeSave(): void
+    {
+        // Only generate slug if it's empty
+        if (empty($this->slug) && !empty($this->title)) {
+            $this->slug = strtolower(str_replace(' ', '-', $this->title));
+        }
+    }
+}
+```
+
+### Example: Sending Welcome Email
+
+```php
+class User extends Model
+{
+    protected function afterCreate(): void
+    {
+        // Send welcome email after the user is created
+        Mail::to($this->email)->send(new WelcomeEmail($this));
+    }
+}
+```
+
+### Example: Preventing Deletion of Protected Records
+
+```php
+class User extends Model
+{
+    protected function beforeDelete(): bool
+    {
+        // Prevent deletion of admin accounts
+        if ($this->role === 'admin') {
+            return false; // Cancels the deletion
+        }
+        return true;
+    }
+}
+```
+
+> [!NOTE]
+> The internal `beforeDelete()` hook can prevent deletion by returning `false`. However, for the `beforeSave`, `beforeCreate`, and `beforeUpdate` hooks, returning `false` does NOT cancel the operation. For cancellation, use external events (see below).
+
+---
+
+## 2. External Events (PSR-14)
+
+Strux fires 11 distinct event objects during the model lifecycle. These events are dispatched through the PSR-14 `EventDispatcherInterface` if one is registered in the container.
+
+### The 11 Lifecycle Events
+
+| Event Class | Fires | Cancelable? |
+|-------------|-------|-------------|
+| `Retrieved` | After a model is loaded from the database | No |
+| `Creating` | Before a new record is inserted | **Yes** |
+| `Created` | After a new record is inserted | No |
+| `Updating` | Before an existing record is updated | **Yes** |
+| `Updated` | After an existing record is updated | No |
+| `Saving` | Before both creates and updates | **Yes** |
+| `Saved` | After both creates and updates | No |
+| `Deleting` | Before a record is deleted | **Yes** |
+| `Deleted` | After a record is deleted | No |
+| `Restoring` | Before a soft-deleted record is restored | **Yes** |
+| `Restored` | After a soft-deleted record is restored | No |
+
+### Event Namespaces
+
+All event classes live under:
+```
+Strux\Component\Database\ORM\Events\
+```
+
+Example:
+```php
+use Strux\Component\Database\ORM\Events\Saving;
+use Strux\Component\Database\ORM\Events\Created;
+use Strux\Component\Database\ORM\Events\Deleted;
+```
+
+### Event Structure
+
+Each event object has at least one property:
+
+```php
+$event->model // The model instance involved in the event
+```
+
+---
+
+## 3. Listening to Events
+
+### Using PHP 8 Attributes
+
+The simplest way to listen to model events is with the `#[Listener]` attribute:
+
+```php
+use Strux\Component\Events\Attributes\Listener;
+use Strux\Component\Database\ORM\Events\Saving;
+
+class PreventAdminTampering
+{
+    #[Listener(event: Saving::class)]
+    public function handle(Saving $event): void
+    {
+        if ($event->model instanceof User && $event->model->email === 'admin@system.com') {
+            echo "Cannot modify the admin account!";
+            $event->cancel();
+        }
+    }
+}
+```
+
+### Without Attributes (PSR-14 Listener)
+
+If you prefer not to use attributes, you can implement the PSR-14 `ListenerInterface`:
+
+```php
+use Psr\EventDispatcher\EventDispatcherInterface;
+
+class SendWelcomeEmail
+{
+    public function __invoke(Created $event): void
+    {
+        $user = $event->model;
+
+        if ($user instanceof User) {
+            Mail::to($user->email)->send(new WelcomeEmail($user));
+        }
+    }
+}
+```
+
+Then register the listener with your event dispatcher.
+
+---
+
+## 4. Canceling Operations
+
+All "before" events (`Creating`, `Updating`, `Saving`, `Deleting`, `Restoring`) have a `cancel()` method. When called, the ORM immediately stops the database operation and returns `false`.
+
+```php
+use Strux\Component\Database\ORM\Events\Saving;
+
+class ValidateEmail
+{
+    public function __invoke(Saving $event): void
+    {
+        if ($event->model instanceof User) {
+            if (!filter_var($event->model->email, FILTER_VALIDATE_EMAIL)) {
+                $event->cancel(); // Prevent saving invalid email
+            }
+        }
+    }
+}
+```
+
+### How Cancellation Works
+
+1. The event is dispatched before the database operation.
+2. If any listener calls `$event->cancel()`, a flag is set on the event.
+3. After all listeners have run, the ORM checks the cancel flag.
+4. If canceled, the operation is aborted and `save()` returns `false`.
+
+> [!NOTE]
+> When an event is canceled, `save()` returns `false`, but no exception is thrown. Your code should check the return value of `save()` and handle failures appropriately.
+
+---
+
+## 5. Disabling Events
+
+Sometimes you want to silence all model events. A common scenario is a bulk import script that creates thousands of records — you don't want every single record to fire events.
+
+### Disable All Events
+
+```php
+use Strux\Component\Database\ORM\Model;
+
+// Disable ALL model events globally
+Model::disableEvents()->all();
+
+// Now do your bulk import
+foreach ($csvData as $row) {
+    User::create($row); // No events fired — much faster!
+}
+
+// Re-enable them when done
+Model::enableAllEvents();
+```
+
+### Disable Specific Events
+
+```php
+use Strux\Component\Database\ORM\Events\Retrieved;
+use Strux\Component\Database\ORM\Events\Saving;
+
+// Only disable the noisy events
+Model::disableEvents()->only([
+    Retrieved::class,
+    Saving::class,
+]);
+
+// Or silence just one
+Model::disableEvents()->only([Saving::class]);
+```
+
+### Event Disabler Return Value
+
+The `disableEvents()` method returns an `EventDisabler` instance that provides two methods:
+
+| Method | Description |
+|--------|-------------|
+| `all()` | Disables ALL model events globally |
+| `only(array $events)` | Disables specific event classes |
+
+> [!TIP]
+| Event disabling is **global** — it affects ALL models, not just one. Use it sparingly and always re-enable events when you are done (or let the request end naturally).
+
+---
+
+## 6. The Retrieved Event
+
+The `Retrieved` event fires every time a model is loaded from the database — whether via `find()`, `first()`, `get()`, or `stream()`.
+
+```php
+use Strux\Component\Database\ORM\Events\Retrieved;
+
+class LogRetrieved
+{
+    public function __invoke(Retrieved $event): void
+    {
+        Logger::info('Model retrieved from database', [
+            'model' => get_class($event->model),
+            'id' => $event->model->id,
+        ]);
+    }
+}
+```
+
+> [!WARNING]
+> The `Retrieved` event fires for EVERY model loaded from the database. If you have a listener attached to this event and you load 1000 models, it fires 1000 times. Be mindful of performance.
+
+---
+
+## 7. Event Flow Diagram
+
+Here is the complete event flow for a save operation:
+
+```
+save() called
+    |
+    v
+beforeSave() hook
+    |
+    v
+validate() — passes?
+    |   |
+    |   +-- NO: return false
+    |
+    v
+Saving event (cancelable)
+    |   |
+    |   +-- canceled? -> return false
+    |
+    v
+handleTimestamps()
+    |
+    v
+[INSERT path]
+    |   Creating event (cancelable)
+    |   |   |
+    |   |   +-- canceled? -> return false
+    |   |
+    |   v
+    |   _performInsert()
+    |   |
+    |   v
+    |   Created event
+    |
+    |--- OR ---
+    |
+    [UPDATE path]
+    |   Is dirty? -> NO: return true (skip)
+    |   |
+    |   v
+    |   Updating event (cancelable)
+    |   |   |
+    |   |   +-- canceled? -> return false
+    |   |
+    |   v
+    |   _performUpdate()
+    |   |
+    |   v
+    |   Updated event
+    |
+    v
+Save original state
+    |
+    v
+Saved event
+    |
+    v
+afterSave() hook
+    |
+    v
+return true
+```
+
+---
+
+## 8. Complete Event Listener Example
+
+```php
+<?php
+
+namespace App\Listeners;
+
+use Strux\Component\Events\Attributes\Listener;
+use Strux\Component\Database\ORM\Events\Created;
+use Strux\Component\Database\ORM\Events\Saved;
+use Strux\Domain\Identity\Entity\User;
+
+class UserEventSubscriber
+{
+    #[Listener(event: Created::class)]
+    public function onUserCreated(Created $event): void
+    {
+        if (!$event->model instanceof User) {
+            return;
+        }
+
+        // Send welcome email
+        Mail::to($event->model->email)->send(new WelcomeEmail());
+
+        // Create default settings
+        UserPreference::create(['userId' => $event->model->id]);
+    }
+
+    #[Listener(event: Saved::class)]
+    public function onUserSaved(Saved $event): void
+    {
+        if (!$event->model instanceof User) {
+            return;
+        }
+
+        // Clear user cache
+        Cache::forget('user_' . $event->model->id);
+    }
+}
+```

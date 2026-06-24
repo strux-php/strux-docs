@@ -1,0 +1,256 @@
+---
+title: Pagination
+sidebar_position: 8
+---
+
+# Pagination: Splitting Results into Pages
+
+When you have hundreds or thousands of records, showing them all on one page is impractical. Pagination splits the results into manageable chunks, each with its own "page."
+
+Think of pagination like chapters in a book — each chapter contains a portion of the story, and you navigate between them with page numbers.
+
+> [!INFO]
+> The ORM provides built-in pagination through the `paginate()` method on query builders.
+
+---
+
+## 1. Basic Pagination
+
+### Simple Paginate
+
+The most common way to paginate results:
+
+```php
+// Get users, 20 per page, default to page 1
+$paginator = User::paginate(20);
+
+// If the current URL has ?page=2, it fetches page 2
+// If no ?page parameter is present, it defaults to page 1
+```
+
+### Paginate with Query Constraints
+
+```php
+// Paginate a filtered query
+$paginator = User::where('active', 1)
+    ->orderBy('created_at', 'DESC')
+    ->paginate(10);
+```
+
+### Paginate with Explicit Page
+
+```php
+// Always get page 3, regardless of URL parameters
+$paginator = User::paginate(15, page: 3);
+```
+
+---
+
+## 2. The Paginator Object
+
+The `paginate()` method returns a `Paginator` instance with helpful properties and methods:
+
+```php
+$paginator = User::where('active', 1)->paginate(10);
+
+// Access the results for the current page
+$users = $paginator->results();
+
+// Get total count across ALL pages
+$total = $paginator->total(); // e.g., 247 total users
+
+// Get the current page number
+$currentPage = $paginator->page(); // e.g., 2
+
+// Get per-page count
+$perPage = $paginator->perPage(); // 10
+
+// Get total number of pages
+$lastPage = $paginator->lastPage(); // e.g., 25
+```
+
+### Full Method Reference
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `results()` | `Collection` | Model instances for the current page |
+| `total()` | `int` | Total number of records across all pages |
+| `page()` | `int` | The current page number |
+| `perPage()` | `int` | Number of items per page |
+| `lastPage()` | `int` | The last available page number |
+| `nextPageUrl()` | `string|null` | URL for the next page |
+| `previousPageUrl()` | `string|null` | URL for the previous page |
+| `hasNextPage()` | `bool` | Whether a next page exists |
+| `hasPreviousPage()` | `bool` | Whether a previous page exists |
+| `firstItem()` | `int` | Position of the first item on this page |
+| `lastItem()` | `int` | Position of the last item on this page |
+
+> [!TIP]
+> `firstItem()` and `lastItem()` give you the absolute positions. For example, on page 2 with 10 per page:
+> - `firstItem()` returns 11
+> - `lastItem()` returns 20
+
+---
+
+## 3. Rendering Pagination in Views
+
+### Using in a Controller
+
+```php
+class UserController extends Controller
+{
+    public function index(ServerRequestInterface $request): Response
+    {
+        $paginator = User::where('active', 1)
+            ->orderBy('lastName', 'ASC')
+            ->paginate(20);
+
+        return $this->view('users/index', [
+            'paginator' => $paginator,
+        ]);
+    }
+}
+```
+
+### In Your Template
+
+```html
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach ($paginator->results() as $user): ?>
+            <tr>
+                <td><?= $user->firstName ?> <?= $user->lastName ?></td>
+                <td><?= $user->email ?></td>
+                <td><?= $user->role ?></td>
+            </tr>
+        <?php endforeach; ?>
+    </tbody>
+</table>
+
+<!-- Previous / Next pagination links -->
+<div class="pagination">
+    <?php if ($paginator->hasPreviousPage()): ?>
+        <a href="<?= $paginator->previousPageUrl() ?>">Previous</a>
+    <?php endif; ?>
+
+    <span>Page <?= $paginator->page() ?> of <?= $paginator->lastPage() ?></span>
+
+    <?php if ($paginator->hasNextPage()): ?>
+        <a href="<?= $paginator->nextPageUrl() ?>">Next</a>
+    <?php endif; ?>
+</div>
+```
+
+---
+
+## 4. Complete Method Reference
+
+### `paginate(int $perPage = 15, ?int $page = null): Paginator`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `$perPage` | `int` | 15 | Number of items per page |
+| `$page` | `int|null` | `null` (auto-detect from URL) | Explicit page number |
+
+### `Paginator` Methods
+
+```php
+// Get the results collection for the current page
+$results = $paginator->results(); // Collection
+
+// Get total record count
+$total = $paginator->total(); // int
+
+// Get current page, per page, and last page
+$page = $paginator->page(); // int
+$perPage = $paginator->perPage(); // int
+$lastPage = $paginator->lastPage(); // int
+
+// Navigation URLs
+$next = $paginator->nextPageUrl(); // string|null
+$prev = $paginator->previousPageUrl(); // string|null
+
+// Navigation booleans
+$hasNext = $paginator->hasNextPage(); // bool
+$hasPrev = $paginator->hasPreviousPage(); // bool
+
+// Item positions
+$firstItem = $paginator->firstItem(); // int
+$lastItem = $paginator->lastItem(); // int
+```
+
+---
+
+## 5. How Pagination Works Internally
+
+When you call `paginate()`, the query builder executes **two queries**:
+
+1. **Count Query**: `SELECT COUNT(*) FROM users WHERE active = 1` — to determine total records
+2. **Data Query**: `SELECT * FROM users WHERE active = 1 ORDER BY last_name ASC LIMIT 20 OFFSET 0` — to fetch the current page
+
+```
+Total Records: 247
+Per Page:      10
+Total Pages:   25
+
+Page 1: Records 1-10   (LIMIT 10 OFFSET 0)
+Page 2: Records 11-20  (LIMIT 10 OFFSET 10)
+Page 3: Records 21-30  (LIMIT 10 OFFSET 20)
+...
+Page 25: Records 241-247 (LIMIT 10 OFFSET 240)
+```
+
+> [!NOTE]
+> The page number is automatically detected from the `?page=` query parameter in the URL. If you use `paginate()` without passing a page number, it reads `$_GET['page']` automatically.
+
+---
+
+## 6. Pagination Best Practices
+
+### Choose the Right Per-Page Count
+
+| Context | Recommended Per Page |
+|---------|---------------------|
+| List of users | 10-25 |
+| Product catalog | 12-24 (matching grid layout) |
+| Search results | 10-20 |
+| Admin tables | 25-50 |
+| API endpoints | 20-100 |
+
+### Always Order Your Paginated Queries
+
+Without an `ORDER BY`, pagination results can be inconsistent — the same item might appear on different pages:
+
+```php
+// BAD: Unpredictable ordering
+$paginator = User::paginate(10);
+
+// GOOD: Consistent ordering
+$paginator = User::orderBy('id', 'ASC')->paginate(10);
+```
+
+### Use in Combination with Filters
+
+```php
+$query = User::query();
+
+if ($request->has('search')) {
+    $query->where('name', 'LIKE', '%' . $request->input('search') . '%');
+}
+
+if ($request->has('role')) {
+    $query->where('role', $request->input('role'));
+}
+
+$paginator = $query->orderBy('created_at', 'DESC')->paginate(15);
+```
+
+> [!TIP]
+> Pagination preserves your WHERE and ORDER BY clauses, making it safe to chain with filters.

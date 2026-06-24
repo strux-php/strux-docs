@@ -1,0 +1,295 @@
+---
+title: Entity Builders (Factories)
+sidebar_position: 7
+---
+
+# Entity Builders: Generating Test Data
+
+Entity Builders (also known as Model Factories) let you quickly generate model instances for testing, seeding, and development. Instead of manually creating model instances with random data, you define a "blueprint" and let the builder create as many as you need.
+
+> [!INFO]
+> Entity Builders are perfect for database seeding (`db:seed`), unit tests, and generating demo data during development.
+
+---
+
+## 1. The EntityBuilder Class
+
+Every Entity Builder extends the abstract `Strux\Component\Database\ORM\EntityBuilder` class:
+
+```php
+use Strux\Component\Database\ORM\EntityBuilder;
+use App\Domain\Identity\Entity\User;
+
+class UserBuilder extends EntityBuilder
+{
+    protected string $model = User::class;
+
+    public function definition(): array
+    {
+        return [
+            'email' => 'test_' . uniqid() . '@example.com',
+            'password' => password_hash('password', PASSWORD_BCRYPT),
+            'active' => true,
+            'role' => 'user',
+        ];
+    }
+}
+```
+
+### Required Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `$model` | `string` | The fully qualified class name of the model this builder creates |
+
+### Required Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `definition()` | `array` | Returns the default attribute values for the model |
+
+---
+
+## 2. Creating Instances
+
+### Make (without Saving)
+
+Creates model instances in memory without persisting them to the database:
+
+```php
+// Single model
+$user = UserBuilder::new()->make();
+
+// Single model with overrides
+$user = UserBuilder::new()->make([
+    'email' => 'custom@example.com',
+    'active' => false,
+]);
+
+// Multiple models (Collection of 10)
+$users = UserBuilder::new()->count(10)->make();
+```
+
+### Create (with Saving)
+
+Creates AND saves model instances to the database:
+
+```php
+// Single saved model
+$user = UserBuilder::new()->create();
+
+// Single saved model with overrides
+$user = UserBuilder::new()->create([
+    'email' => 'saved@example.com',
+]);
+
+// Multiple saved models
+$users = UserBuilder::new()->count(10)->create();
+
+// All 10 are saved to the database!
+```
+
+### The Difference Between Make and Create
+
+| Method | Saves to DB? | Returns |
+|--------|-------------|---------|
+| `make()` | No | Single Model or Collection |
+| `create()` | Yes | Single Model or Collection |
+
+---
+
+## 3. Builder Methods
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| `new()` | — | Creates a new builder instance (static) |
+| `count(int)` | Number of instances | Sets how many models to generate |
+| `make(array)` | Attribute overrides | Generates instances without saving |
+| `create(array)` | Attribute overrides | Generates and saves instances |
+
+### Method Chaining
+
+```php
+$users = UserBuilder::new()
+    ->count(25)
+    ->create(['active' => true]);
+```
+
+---
+
+## 4. Attribute Overrides
+
+Attributes passed to `make()` or `create()` override the defaults from `definition()`:
+
+```php
+// definition() provides: email, password, active, role
+// But we override email and role:
+$admin = UserBuilder::new()->create([
+    'email' => 'admin@example.com',
+    'role' => 'admin',
+]);
+
+// Result: email='admin@example.com', password='password' (from definition),
+//         active=true (from definition), role='admin' (overridden)
+```
+
+> [!TIP]
+| Overrides use `array_merge()` internally: `$merged = array_merge($definition, $overrides)`. Overrides always win.
+
+---
+
+## 5. Using Builders for Seeding
+
+Entity Builders are the recommended way to seed your database:
+
+```php
+// In your seeder file
+class DatabaseSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Create 50 users
+        UserBuilder::new()->count(50)->create();
+
+        // Create 10 products for each user
+        $users = User::all();
+        foreach ($users as $user) {
+            ProductBuilder::new()
+                ->count(5)
+                ->create(['userId' => $user->id]);
+        }
+    }
+}
+```
+
+---
+
+## 6. Using Builders in Tests
+
+```php
+class UserTest extends TestCase
+{
+    public function testUserCanBeCreated(): void
+    {
+        $user = UserBuilder::new()->create();
+
+        $this->assertNotNull($user->id);
+        $this->assertTrue($user->exists());
+        $this->assertDatabaseHas('users', ['id' => $user->id]);
+    }
+
+    public function testUserHasDefaultRole(): void
+    {
+        $user = UserBuilder::new()->create();
+
+        $this->assertEquals('user', $user->role);
+    }
+}
+```
+
+---
+
+## 7. Complete Builder Example
+
+```php
+<?php
+
+namespace App\Infrastructure\Database\Builders;
+
+use App\Domain\Identity\Entity\User;
+use Strux\Component\Database\ORM\EntityBuilder;
+
+class UserBuilder extends EntityBuilder
+{
+    protected string $model = User::class;
+
+    public function definition(): array
+    {
+        return [
+            'email' => 'user_' . bin2hex(random_bytes(4)) . '@test.com',
+            'password' => password_hash('testpassword', PASSWORD_BCRYPT),
+            'firstName' => fake()->firstName(),
+            'lastName' => fake()->lastName(),
+            'active' => true,
+            'role' => 'user',
+            'status' => 'active',
+        ];
+    }
+}
+```
+
+```php
+// Usage
+use App\Infrastructure\Database\Builders\UserBuilder;
+
+// Create one active user
+$user = UserBuilder::new()->create();
+
+// Create 5 inactive users
+$inactiveUsers = UserBuilder::new()
+    ->count(5)
+    ->create(['active' => false]);
+
+// Create 100 users for stress testing
+$stressUsers = UserBuilder::new()
+    ->count(100)
+    ->create();
+```
+
+---
+
+## 8. Builder Tips
+
+### Unique Values
+
+Since `definition()` is called for EACH model instance, using `uniqid()`, `random_bytes()`, or `time()` ensures unique values:
+
+```php
+public function definition(): array
+{
+    return [
+        'email' => 'user_' . uniqid() . '@example.com',
+        'sku' => 'SKU-' . strtoupper(bin2hex(random_bytes(4))),
+    ];
+}
+```
+
+### Using Faker
+
+You can use the Faker library for realistic data:
+
+```php
+public function definition(): array
+{
+    $faker = \Faker\Factory::create();
+
+    return [
+        'email' => $faker->unique()->email(),
+        'name' => $faker->name(),
+        'bio' => $faker->sentence(),
+    ];
+}
+```
+
+### Builder Inheritance
+
+You can extend builders for specialized variations:
+
+```php
+class AdminUserBuilder extends UserBuilder
+{
+    public function definition(): array
+    {
+        return array_merge(parent::definition(), [
+            'role' => 'admin',
+            'active' => true,
+        ]);
+    }
+}
+
+// Usage
+$admin = AdminUserBuilder::new()->create();
+```
+
+> [!NOTE]
+> Entity Builders are the same concept as "Model Factories" in other frameworks. The name "Entity Builder" emphasizes that they build domain entities.

@@ -134,6 +134,25 @@ Use this attribute to safely tell the database: "Hey, just rename the existing c
 public string $billingAddress;
 ```
 
+### `#[Timestamps]`
+Automatically manages `created_at` and `updated_at` columns. The framework sets `created_at` when a record is first inserted and updates `updated_at` every time the record is saved.
+
+```php
+#[Timestamps]
+class Post extends Model { ... }
+```
+
+### `#[SoftDelete]`
+Adds soft delete capability to your model. Instead of permanently deleting rows, the framework sets a `deleted_at` timestamp, and normal queries automatically exclude soft-deleted records.
+
+```php
+#[SoftDelete]
+class Post extends Model { ... }
+```
+
+> [!TIP]
+> See the complete [Attributes Reference](/docs/database/attributes) for all schema attributes and their options.
+
 ---
 
 ## 🔗 Automatic Relationships & Foreign Keys

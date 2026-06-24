@@ -1,0 +1,270 @@
+---
+title: Query Caching (Stash)
+sidebar_position: 6
+---
+
+# Query Caching: The Stash API
+
+Reading from the database can be slow, especially for complex queries that run on every page load. The **Stash API** provides a built-in caching system that stores query results in memory, so subsequent requests don't need to hit the database.
+
+Think of it as giving your database queries a photographic memory.
+
+> [!INFO]
+> The Stash API uses the `CacheInterface` from the PSR container. If you have a cache service (like Redis, Memcached, or file-based cache) registered in your container, Stash will use it automatically.
+
+---
+
+## 1. Two Ways to Use Stash
+
+### Method 1: The `#[Stash]` Attribute (Class-Level)
+
+Add `#[Stash]` to your entire Model class to cache ALL queries automatically:
+
+```php
+use Strux\Component\Database\ORM\Attributes\Stash;
+
+#[Stash(ttl: 60)] // Cache all queries for 60 seconds
+class Setting extends Model
+{
+    // ...
+}
+```
+
+Now every query on the `Setting` model is automatically cached:
+
+```php
+// First call: hits the database, caches the result
+$settings = Setting::all();
+
+// Second call (within 60 seconds): returns cached result, no database query
+$settings = Setting::all();
+
+// After 60 seconds: expires, next call hits the database again
+```
+
+### Method 2: The `stashFor()` Method (Query-Level)
+
+Cache a specific query without affecting other queries on the same model:
+
+```php
+// Only this specific query is cached for 1 hour
+$popularProducts = Product::where('views', '>', 1000)
+    ->stashFor(3600, 'popular_products')
+    ->get();
+
+// Other queries on Product are NOT cached
+$allProducts = Product::all(); // Hits database normally
+```
+
+### Method 3: `stashForever()`
+
+Cache a query permanently (until explicitly cleared):
+
+```php
+$countries = Country::orderBy('name', 'ASC')
+    ->stashForever('countries_list')
+    ->get();
+```
+
+> [!CAUTION]
+> `stashForever()` never expires. You must manually call `dropStash()` to invalidate it. Use this only for data that rarely or never changes.
+
+---
+
+## 2. Stash Parameters
+
+### The `#[Stash]` Attribute
+
+| Parameter | Type | Default | Required | Description |
+|-----------|------|---------|----------|-------------|
+| `ttl` | `int` | — | Yes | Time-to-live in seconds. How long to cache results before refreshing. |
+
+### The `stashFor()` Method
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `$seconds` | `int` | — | Cache duration in seconds |
+| `$key` | `string` | Auto-generated | Optional custom cache key |
+
+### The `stashForever()` Method
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `$key` | `string` | Auto-generated | Optional custom cache key |
+
+---
+
+## 3. Cache Key Generation
+
+If you don't provide a custom cache key, Stash automatically generates one based on the query:
+
+```php
+User::where('active', 1)
+    ->orderBy('name', 'ASC')
+    ->stashFor(300)
+    ->get();
+
+// Auto-generated key (MD5 hash of the SQL + bindings):
+// stash_users_select_*_from_users_where_active_=_?_order_by_name_ASC_a1b2c3d4...
+```
+
+Providing a custom key makes it easier to invalidate later:
+
+```php
+User::where('active', 1)
+    ->stashFor(300, 'active_users')
+    ->get();
+```
+
+---
+
+## 4. Invalidating the Cache
+
+When data changes, you need to clear the cache so the next request gets fresh data.
+
+### Drop a Specific Key
+
+```php
+// Clear the specific cached query
+Product::dropStash('popular_products');
+```
+
+### Drop Class-Level Cache
+
+If you used `#[Stash]` on the model class, you need to know the auto-generated keys to drop them. For class-level caching, it is often easier to use a shorter TTL or manually clear all cache.
+
+```php
+// If you know the exact key
+Setting::dropStash('stash_settings_all');
+```
+
+### When Should You Invalidate?
+
+Common invalidation points:
+
+```php
+class Product extends Model
+{
+    protected function afterSave(): void
+    {
+        // Clear cached queries when a product is created or updated
+        Product::dropStash('popular_products');
+        Product::dropStash('featured_products');
+    }
+
+    protected function afterDelete(): void
+    {
+        Product::dropStash('popular_products');
+    }
+}
+```
+
+---
+
+## 5. Practical Examples
+
+### Caching a Settings Model
+
+Settings are loaded on every page and rarely change — perfect for caching:
+
+```php
+#[Stash(ttl: 300)] // Cache for 5 minutes
+class Setting extends Model
+{
+    // ...
+}
+
+// In your controller
+$settings = Setting::all(); // Cached automatically
+```
+
+### Caching Expensive Queries
+
+```php
+// Dashboard with expensive aggregation queries
+class DashboardController extends Controller
+{
+    public function index(): Response
+    {
+        $stats = Order::query()
+            ->selectRaw('
+                COUNT(*) as total_orders,
+                SUM(total) as revenue,
+                AVG(total) as average_order
+            ')
+            ->where('created_at', '>=', now()->subDays(30))
+            ->stashFor(600, 'dashboard_stats_30days') // Cache 10 minutes
+            ->first();
+
+        return $this->view('dashboard/index', ['stats' => $stats]);
+    }
+}
+```
+
+### Conditional Caching
+
+```php
+$query = Product::where('active', 1);
+
+// Only cache if it's a complex query
+if ($request->has('search') || $request->has('category')) {
+    $query->stashFor(60); // Cache filtered results briefly
+}
+
+$products = $query->get();
+```
+
+---
+
+## 6. How Caching Works Internally
+
+1. When you call `stashFor()`, the query builder notes the cache settings.
+2. When you call `get()`, the query builder checks:
+   - Does the model have `#[Stash]`? OR
+   - Was `stashFor()` called on this query?
+3. If caching is enabled, it generates a cache key (from your provided key or auto-generated from the SQL).
+4. It tries to retrieve the results from the cache.
+   - **Cache HIT**: Return cached results immediately (no database query).
+   - **Cache MISS**: Execute the query, store results in cache, return results.
+5. On subsequent requests within the TTL, results come from the cache.
+
+```
+Request 1: Cache MISS -> Query Database -> Store in Cache -> Return Results
+Request 2: Cache HIT  -> Return from Cache (fast!)
+Request 3: Cache HIT  -> Return from Cache (fast!)
+...
+After TTL expires: Cache MISS -> Query Database -> Store in Cache -> Return Results
+```
+
+> [!TIP]
+> The Stash cache is only as good as your cache backend. For production, use Redis or Memcached. For development, a file-based cache works fine.
+
+---
+
+## 7. Stash Best Practices
+
+### DO Cache:
+- Configuration and settings
+- Country lists, category trees
+- Dashboard statistics
+- Search results (short TTL)
+- Menu structures
+
+### DON'T Cache:
+- User-specific data
+- Real-time data (stock prices, live counts)
+- Data that changes every request
+- Anything with a per-user WHERE clause
+
+### TTL Guidelines:
+
+| Data Type | Recommended TTL |
+|-----------|----------------|
+| Settings / Config | 300-3600 seconds (5 min to 1 hour) |
+| Category trees | 3600-86400 seconds (1 hour to 1 day) |
+| Dashboard stats | 60-600 seconds (1 to 10 minutes) |
+| Search results | 30-120 seconds (brief caching) |
+| Country lists | 86400+ seconds (1 day or permanent) |
+
+> [!NOTE]
+> A cached query returns exactly the same result until it expires or is invalidated. If your data changes frequently, use a shorter TTL or manually invalidate the cache after writes.

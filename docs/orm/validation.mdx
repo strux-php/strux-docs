@@ -1,0 +1,346 @@
+---
+title: Validation
+sidebar_position: 5
+---
+
+# Auto-Validation: Keeping Bad Data Out
+
+Never trust user input. Every piece of data that enters your application should be validated before it is saved to the database. Strux provides **Auto-Validation** — validation rules defined directly on your model properties using PHP attributes.
+
+When you call `save()`, the ORM automatically checks all validation rules before writing to the database. If any rule fails, the save is aborted and errors are stored on the model.
+
+> [!INFO]
+> Auto-validation is provided by the `HasValidation` trait, which is included in the base `Model` class by default.
+
+---
+
+## 1. Defining Validation Rules with `#[Validate]`
+
+Add the `#[Validate]` attribute to your model properties:
+
+```php
+use Strux\Component\Database\ORM\Attributes\Validate;
+use Strux\Component\Database\Schema\Attributes\Column;
+
+class Brand extends Model
+{
+    #[Column]
+    #[Validate([
+        'required' => 'The brand name is required!',
+        'alpha'    => 'The brand name must only contain letters.',
+        'min:3'    => 'The brand name must be at least 3 characters long.'
+    ])]
+    public string $name;
+
+    #[Column]
+    #[Validate([
+        'required',
+        'unique:brands,slug' => 'Oops! This slug is already taken.'
+    ])]
+    public string $slug;
+}
+```
+
+### Rule Formats
+
+Each validation rule can be defined in two formats:
+
+**Format 1: Rule string only (uses default error message)**
+
+```php
+#[Validate(['required', 'email', 'min:8'])]
+public string $email;
+```
+
+**Format 2: Rule with custom error message**
+
+```php
+#[Validate([
+    'required' => 'Please provide your email address.',
+    'email'    => 'That does not look like a valid email.',
+    'min:8'    => 'Email must be at least 8 characters.'
+])]
+public string $email;
+```
+
+### Multiple Rules
+
+```php
+#[Validate([
+    'required' => 'Name is required.',
+    'min:2'    => 'Name is too short (min 2 chars).',
+    'max:100'  => 'Name is too long (max 100 chars).',
+    'alpha'    => 'Name must contain only letters.',
+])]
+public string $name;
+```
+
+---
+
+## 2. How Auto-Validation Works
+
+When you call `save()`, the ORM follows this sequence:
+
+```php
+$brand = new Brand();
+$brand->name = 'A'; // Fails the min:3 rule
+$brand->slug = 'my-brand';
+
+$result = $brand->save(); // Validation runs here!
+
+if ($result === false) {
+    $errors = $brand->getErrors();
+    // $errors['name'] = 'The brand name must be at least 3 characters long.'
+}
+```
+
+### The Validation Flow
+
+```
+1. User calls $model->save()
+2. ORM calls $model->validate()
+3. validate() calls $model->getRules()
+4. getRules() reads all #[Validate] attributes
+5. Rules are merged with any existing $rules property
+6. The Validator service checks the data against the rules
+7. If valid: save() continues normally
+8. If invalid: save() returns false, errors stored in $this->_errors
+```
+
+> [!TIP]
+> Validation runs automatically on every `save()` call. You don't need to manually validate before saving.
+
+---
+
+## 3. Retrieving Validation Errors
+
+After a failed save, errors are available via `getErrors()`:
+
+```php
+$brand = new Brand();
+$brand->name = 'A'; // Too short
+
+$brand->save(); // Returns false
+
+// Get all errors
+$errors = $brand->getErrors();
+// $errors = ['name' => 'The brand name must be at least 3 characters long.']
+
+// Display in your view
+foreach ($errors as $field => $message) {
+    echo "<p class='error'>$message</p>";
+}
+```
+
+---
+
+## 4. Manual Validation
+
+You can also validate manually without saving:
+
+```php
+$brand = new Brand();
+$brand->name = 'Test';
+
+if ($brand->validate()) {
+    echo "Data is valid!";
+} else {
+    $errors = $brand->getErrors();
+}
+```
+
+### Throwing Exceptions on Validation Failure
+
+```php
+try {
+    $brand->validate(true); // Pass true to throw on failure
+} catch (\Strux\Component\Exceptions\ValidationException $e) {
+    $errors = $e->getErrors();
+    // Handle the exception
+}
+```
+
+---
+
+## 5. The `getRules()` Method
+
+You can override `getRules()` in your model to define rules programmatically:
+
+```php
+class User extends Model
+{
+    public function getRules(): array
+    {
+        // Start with attribute-defined rules
+        $rules = parent::getRules();
+
+        // Add dynamic rules
+        $rules['email'][] = 'unique:users,email';
+        $rules['password'][] = 'min:12';
+
+        return $rules;
+    }
+}
+```
+
+### Rules Priority
+
+1. Any `#[Validate]` attributes on properties are collected.
+2. If the model has a `$rules` property, those rules are also collected.
+3. All rules are merged together.
+4. During updates, `unique` rules are automatically modified to exclude the current record.
+
+---
+
+## 6. Automatic Unique Rule Adjustment
+
+One of the most powerful features is that the ORM automatically adjusts `unique` rules during updates.
+
+Consider a user updating their profile. Without adjustment, the `unique:users,email` rule would fail because the user's own email already exists in the database.
+
+```php
+class User extends Model
+{
+    #[Column]
+    #[Validate([
+        'required',
+        'unique:users,email' => 'This email is already taken.'
+    ])]
+    public string $email;
+}
+```
+
+When updating:
+
+```php
+$user = User::find(1);
+$user->name = 'New Name';
+
+// The ORM automatically transforms the unique rule to:
+// 'unique:users,email,1,id'
+// This excludes the current record (ID 1) from the uniqueness check.
+
+$user->save(); // Works correctly!
+```
+
+### How It Works
+
+During an update:
+1. The ORM detects that the model `exists()` in the database.
+2. It reads the model's primary key value.
+3. It modifies each `unique[table, column]` rule to `unique[table, column, {pkValue}, {pkName}]`.
+4. This tells the validator: "Check uniqueness, but ignore the record with this primary key."
+
+> [!NOTE]
+> The automatic adjustment only works if the `unique` rule uses the 2-parameter format: `unique[table, column]`. It does NOT work with 1-parameter `unique` or other formats.
+
+---
+
+## 7. Complete Validation Rule Reference
+
+The available validation rules depend on your application's validator service. Here are the default supported rules:
+
+| Rule | Description | Example |
+|------|-------------|---------|
+| `required` | Field must not be empty | `'required'` |
+| `email` | Must be a valid email format | `'email'` |
+| `min:N` | Minimum length or value | `'min:3'` |
+| `max:N` | Maximum length or value | `'max:255'` |
+| `alpha` | Only alphabetic characters | `'alpha'` |
+| `alpha_num` | Only letters and numbers | `'alpha_num'` |
+| `numeric` | Must be numeric | `'numeric'` |
+| `integer` | Must be an integer | `'integer'` |
+| `url` | Must be a valid URL | `'url'` |
+| `unique:table,column` | Must be unique in the database | `'unique:users,email'` |
+| `confirmed` | Must match `{field}_confirmation` | `'confirmed'` |
+| `in:val1,val2,...` | Must be one of the listed values | `'in:active,pending'` |
+
+> [!TIP]
+> You can add custom validation rules by extending the `Validator` class or registering new rules with the validator service.
+
+---
+
+## 8. Validation Tips and Patterns
+
+### Conditional Validation
+
+Use getRules() to conditionally apply rules:
+
+```php
+class User extends Model
+{
+    public function getRules(): array
+    {
+        $rules = parent::getRules();
+
+        // Only require password on creation
+        if ($this->isNew()) {
+            $rules['password'][] = 'required';
+            $rules['password'][] = 'min:12';
+        }
+
+        return $rules;
+    }
+}
+```
+
+### Validating Before Manual Save
+
+```php
+$brand = new Brand();
+$brand->name = 'Test Brand';
+$brand->slug = 'test-brand';
+
+if ($brand->validate()) {
+    // Manual operations before save
+    $brand->someCustomField = computeValue();
+
+    if ($brand->save()) {
+        echo "Saved successfully!";
+    }
+} else {
+    print_r($brand->getErrors());
+}
+```
+
+### Using Validation with Forms
+
+```php
+// In your controller
+public function store(Request $request): Response
+{
+    $brand = new Brand();
+    $brand->name = $request->get('name');
+    $brand->slug = $request->get('slug');
+
+    if ($brand->save()) {
+        $this->flash->set('success', 'Brand created!');
+        return redirect('/brands');
+    }
+
+    // Validation failed — show errors in the form
+    return $this->view('brands/create', [
+        'brand' => $brand,
+        'errors' => $brand->getErrors(),
+    ]);
+}
+```
+
+### Disabling Validation
+
+You can bypass validation by calling `save()` after manually calling the internal methods:
+
+```php
+// There is no built-in "skip validation" flag.
+// Instead, override getRules() to return empty rules conditionally:
+public function getRules(): array
+{
+    if ($this->skipValidation) {
+        return [];
+    }
+    return parent::getRules();
+}
+```
+
+> [!CAUTION]
+> Disabling validation can lead to corrupt data in your database. Only skip validation when you absolutely trust the data source (e.g., importing from another trusted system).
