@@ -57,9 +57,25 @@ const sidebars = {
             collapsed: false,
             items: [
                 { type: 'doc', id: 'database/introduction', label: 'Introduction' },
-                { type: 'doc', id: 'orm/query-builder', label: 'Query Builder' },
-                { type: 'doc', id: 'orm/models', label: 'ORM' },
+                { type: 'doc', id: 'database/attributes', label: 'Schema Attributes' },
                 { type: 'doc', id: 'database/migrations', label: 'Migrations Guide' },
+            ],
+        },
+        {
+            type: 'category',
+            label: 'ORM',
+            collapsed: false,
+            items: [
+                { type: 'doc', id: 'orm/models', label: 'Models' },
+                { type: 'doc', id: 'orm/query-builder', label: 'Query Builder' },
+                { type: 'doc', id: 'orm/relationships', label: 'Relationships' },
+                { type: 'doc', id: 'orm/events', label: 'Events' },
+                { type: 'doc', id: 'orm/validation', label: 'Validation' },
+                { type: 'doc', id: 'orm/caching', label: 'Caching (Stash)' },
+                { type: 'doc', id: 'orm/entity-builders', label: 'Entity Builders' },
+                { type: 'doc', id: 'orm/pagination', label: 'Pagination' },
+                { type: 'doc', id: 'orm/soft-deletes', label: 'Soft Deletes' },
+                { type: 'doc', id: 'orm/transactions', label: 'Transactions' },
             ],
         },
         {
@@ -126,7 +142,6 @@ const sidebars = {
             collapsed: false,
             items: [
                 { type: 'doc', id: 'core/controllers', label: 'Controllers' },
-                { type: 'doc', id: 'orm/relationships', label: 'Models' },
                 { type: 'doc', id: 'core/services', label: 'Services' },
             ],
         },

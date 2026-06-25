@@ -16,6 +16,50 @@ Strux uses the **Active Record** pattern. This means your data AND the logic to 
 
 ## 1. Creating a Model
 
+### Generating a Model via CLI
+
+The fastest way to create a model is using the `new:entity` command (also aliased as `new:model`, `g:e`, or `g:m`):
+
+```bash
+php bin/console new:entity User
+```
+
+This creates a `User` model at `src/Domain/General/Entity/User.php` with a basic skeleton:
+
+```php
+#[Entity(table: 'users')]
+class User extends Model
+{
+    #[Id, Column(type: Field::integer)]
+    public ?int $id = null;
+
+    #[Column(type: Field::string, length: 150)]
+    public string $name;
+}
+```
+
+**Options:**
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--domain` | `-d` | Domain directory to place the entity in (default: `General`) |
+| `--migrate` | `-m` | Also generate a migration file immediately after creating the entity |
+| `--uuid` | | Use UUID as the primary key type instead of auto-increment integer |
+| `--ulid` | | Use ULID as the primary key type instead of auto-increment integer |
+
+```bash
+php bin/console new:entity Product --domain=Catalog
+php bin/console new:entity Product --domain=Catalog --migrate
+php bin/console new:entity Product --uuid
+php bin/console g:e Product           # short alias
+php bin/console g:m Product           # short alias
+```
+
+> [!TIP]
+> Passing `--migrate` runs `db:migrate` targeting the new model right away, so you can go from zero to a migrated table in one command.
+
+### Creating a Model Manually
+
 Every model must extend the abstract `Strux\Component\Database\ORM\Model` class.
 
 ```php

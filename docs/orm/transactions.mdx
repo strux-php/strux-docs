@@ -20,14 +20,12 @@ If step 1 succeeds but step 2 fails, you must undo step 1. A transaction handles
 
 ## 1. Basic Transactions
 
-### Connection-Level Transactions
+Transactions are managed through static methods on the `Model` class. Any model class can start, commit, or roll back a transaction.
 
-The simplest way to run a transaction:
+### Manual Transaction
 
 ```php
-$db = Connection::connection('default');
-
-$db->beginTransaction();
+Model::beginTransaction();
 
 try {
     // Subtract from sender
@@ -39,22 +37,20 @@ try {
     $receiver->save();
 
     // If we get here, both operations succeeded
-    $db->commit();
+    Model::commit();
 } catch (\Throwable $e) {
     // If anything went wrong, undo everything
-    $db->rollBack();
+    Model::rollBack();
     throw $e;
 }
 ```
 
-### Helper: `transaction(callable)`
+### The `transaction()` Helper
 
-The Connection class provides a helper that handles begin/commit/rollback automatically:
+The `Model::transaction()` helper handles begin, commit, and rollback automatically:
 
 ```php
-use Strux\Component\Database\Connection;
-
-Connection::connection('default')->transaction(function () use ($sender, $receiver) {
+Model::transaction(function () use ($sender, $receiver) {
     $sender->balance -= 100;
     $sender->save();
 
@@ -63,7 +59,10 @@ Connection::connection('default')->transaction(function () use ($sender, $receiv
 });
 ```
 
-If the callable returns `false` or throws an exception, the transaction is rolled back automatically.
+If the callable throws an exception, the transaction is rolled back automatically.
+
+> [!TIP]
+> You can call `Model::transaction()` on any model class — `User::transaction(...)`, `Product::transaction(...)`, etc. They all share the same underlying transaction because the nesting level is tracked statically.
 
 ---
 
@@ -71,38 +70,35 @@ If the callable returns `false` or throws an exception, the transaction is rolle
 
 | Method | Description |
 |--------|-------------|
-| `beginTransaction()` | Start a new transaction |
-| `commit()` | Save all changes made during the transaction |
-| `rollBack()` | Undo all changes made during the transaction |
-| `transaction(callable)` | Run a callable within a transaction (auto-commit/rollback) |
+| `Model::beginTransaction()` | Start a new transaction (or create a savepoint if nested) |
+| `Model::commit()` | Save all changes made during the transaction (or release savepoint) |
+| `Model::rollBack()` | Undo all changes (or roll back to savepoint) |
+| `Model::transaction(Closure)` | Run a callable within a transaction (auto-commit/rollback) |
 
 ---
 
 ## 3. Nested Transactions (Savepoints)
 
-Some databases (MySQL, PostgreSQL, SQLite) support **savepoints** — checkpoints within a transaction that you can roll back to without aborting the entire transaction.
-
-> [!WARNING]
-> Nested transactions are only supported on databases that support savepoints. Oracle and SQL Server have limited support.
+The framework supports **nested transactions** via database savepoints. The first call to `beginTransaction()` starts a real database transaction. Subsequent nested calls create savepoints (`SAVEPOINT trans_1`, `SAVEPOINT trans_2`, etc.).
 
 ### How Savepoints Work
 
 ```php
-$db->beginTransaction();
+Model::beginTransaction();
 
 // First operation
 $order->status = 'pending';
 $order->save();
 
-// Create a savepoint
-$db->beginTransaction(); // Savepoint created internally
+// Create a savepoint (nested transaction)
+Model::beginTransaction();
 
 // Second operation (might fail)
 try {
     $inventory->reduceStock($order->items);
-    $db->commit(); // Releases savepoint
+    Model::commit(); // Releases savepoint
 } catch (\Throwable $e) {
-    $db->rollBack(); // Rolls back to savepoint, NOT to the beginning
+    Model::rollBack(); // Rolls back to savepoint, NOT to the beginning
     // $order is still saved as "pending"
 }
 
@@ -110,16 +106,15 @@ try {
 $payment->process($order);
 $payment->save();
 
-$db->commit(); // Commits everything
+Model::commit(); // Commits everything
 ```
 
 ### Nested Transaction Rules
 
-| Level | Outer Transaction | Nested (Savepoint) |
-|-------|-------------------|-------------------|
-| `beginTransaction()` | Starts the real DB transaction | Creates a savepoint |
-| `commit()` | Commits all changes | Releases the savepoint |
-| `rollBack()` | Rolls back the entire transaction | Rolls back to the savepoint |
+| Level | `beginTransaction()` | `commit()` | `rollBack()` |
+|-------|---------------------|------------|--------------|
+| Outer (level 1) | Starts real DB transaction | Commits all changes | Rolls back everything |
+| Nested (level 2+) | Creates a savepoint | Releases the savepoint | Rolls back to the savepoint |
 
 > [!TIP]
 > The outer `rollBack()` always undoes everything, including all nested savepoints. Only inner `rollBack()` targets the savepoint.
@@ -128,11 +123,11 @@ $db->commit(); // Commits everything
 
 ## 4. When to Use Transactions
 
-### ✅ Always Use Transactions For:
+### Always Use Transactions For:
 
 **Financial operations:**
 ```php
-Connection::connection('default')->transaction(function () use ($invoice, $payment) {
+Model::transaction(function () use ($invoice, $payment) {
     $invoice->markAsPaid();
     $payment->record($invoice->total);
     $account->addBalance($invoice->total);
@@ -141,7 +136,7 @@ Connection::connection('default')->transaction(function () use ($invoice, $payme
 
 **Multi-step operations:**
 ```php
-Connection::connection('default')->transaction(function () use ($order) {
+Model::transaction(function () use ($order) {
     $order->status = 'confirmed';
     $order->save();
 
@@ -158,49 +153,49 @@ Connection::connection('default')->transaction(function () use ($order) {
 
 **Bulk updates:**
 ```php
-Connection::connection('default')->transaction(function () use ($newPrice) {
+Model::transaction(function () use ($newPrice) {
     Product::where('categoryId', 5)->update(['price' => $newPrice]);
     Product::where('categoryId', 6)->update(['price' => $newPrice * 0.9]);
     Product::where('categoryId', 7)->update(['price' => $newPrice * 0.8]);
 });
 ```
 
-### ❌ Don't Need Transactions:
+### Don't Need Transactions:
 
 - Single read or write operations
 - Operations that don't depend on each other
-- Logging or auditing (use separate connections if possible)
 
 ---
 
-## 5. Transaction Isolation Levels
+## 5. How Write Connections Work During Transactions
 
-> [!INFO]
-> The ORM uses the default isolation level of your database (usually `READ COMMITTED`). You can change it at the database or connection level if needed.
+When a transaction is active, all database operations automatically use the **write** connection. This ensures that all queries within the transaction see the uncommitted changes:
 
-| Level | Dirty Read | Non-Repeatable Read | Phantom Read |
-|-------|-----------|-------------------|--------------|
-| READ UNCOMMITTED | Possible | Possible | Possible |
-| READ COMMITTED | Safe | Possible | Possible |
-| REPEATABLE READ | Safe | Safe | Possible |
-| SERIALIZABLE | Safe | Safe | Safe |
+```php
+Model::beginTransaction();
+
+// Even though these are reads, they use the 'write' connection
+// so they can see uncommitted changes from within the transaction
+$sender = User::find($fromId);
+$receiver = User::find($toId);
+
+// Writes also go through the same write connection
+$sender->balance -= $amount;
+$sender->save();
+
+Model::commit();
+```
 
 ---
 
 ## 6. Complete Working Example
 
 ```php
-<?php
-
-use Strux\Component\Database\Connection;
-
 class TransferService
 {
     public function transferFunds(int $fromId, int $toId, float $amount): void
     {
-        $db = Connection::connection('default');
-
-        $db->beginTransaction();
+        Model::beginTransaction();
 
         try {
             $sender = User::find($fromId);
@@ -220,7 +215,6 @@ class TransferService
             $receiver->balance += $amount;
             $receiver->save();
 
-            // Create transaction log
             TransactionLog::create([
                 'fromId' => $fromId,
                 'toId' => $toId,
@@ -228,10 +222,9 @@ class TransferService
                 'type' => 'transfer',
             ]);
 
-            $db->commit();
-
+            Model::commit();
         } catch (\Throwable $e) {
-            $db->rollBack();
+            Model::rollBack();
             throw $e;
         }
     }
@@ -245,7 +238,7 @@ class TransferService
 {
     public function transferFunds(int $fromId, int $toId, float $amount): void
     {
-        Connection::connection('default')->transaction(function () use ($fromId, $toId, $amount) {
+        Model::transaction(function () use ($fromId, $toId, $amount) {
             $sender = User::find($fromId);
             $receiver = User::find($toId);
 
@@ -284,30 +277,27 @@ Long-running transactions hold database locks and can cause contention:
 
 ```php
 // BAD: Sending emails inside the transaction
-$db->transaction(function () use ($user) {
+Model::transaction(function () use ($user) {
     $user->save();
     $this->sendEmail($user->email); // Slow! Holds locks!
 });
 
 // GOOD: Send email outside the transaction
-$db->transaction(function () use ($user) {
+Model::transaction(function () use ($user) {
     $user->save();
 });
 $this->sendEmail($user->email);
 ```
 
-### Never Nest Manually
+### Use the Helper When Possible
 
-Always use `beginTransaction()` / `commit()` / `rollBack()` at a single level. Let savepoints handle nesting automatically:
+The `transaction()` helper is preferred because it handles begin, commit, and rollback automatically:
 
 ```php
-// GOOD: Framework handles savepoints
-$db->beginTransaction();
-// ... operations ...
-$db->beginTransaction(); // Savepoint
-// ... more operations ...
-$db->commit(); // Release savepoint
-$db->commit(); // Commit outer
+// Preferred: Clean, safe, automatic
+Model::transaction(function () {
+    // your operations
+});
 ```
 
 ### Always Roll Back on Failure
@@ -316,30 +306,19 @@ Uncommitted transactions can leave locks hanging and cause deadlocks:
 
 ```php
 // BAD: No rollback on error
-$db->beginTransaction();
+Model::beginTransaction();
 $user->save(); // Throws exception
 // Transaction stays open! Locks held!
 
 // GOOD: Always roll back
 try {
-    $db->beginTransaction();
+    Model::beginTransaction();
     $user->save();
-    $db->commit();
+    Model::commit();
 } catch (\Throwable $e) {
-    $db->rollBack();
+    Model::rollBack();
     throw $e;
 }
-```
-
-### Use the Helper When Possible
-
-The `transaction(callable)` helper is preferred because it handles begin, commit, and rollback automatically:
-
-```php
-// Preferred: Clean, safe, automatic
-Connection::connection('default')->transaction(function () {
-    // your operations
-});
 ```
 
 > [!WARNING]

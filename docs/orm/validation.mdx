@@ -35,7 +35,7 @@ class Brand extends Model
     #[Column]
     #[Validate([
         'required',
-        'unique:brands,slug' => 'Oops! This slug is already taken.'
+        'unique[brands,slug]' => 'Oops! This slug is already taken.'
     ])]
     public string $slug;
 }
@@ -175,7 +175,7 @@ class User extends Model
         $rules = parent::getRules();
 
         // Add dynamic rules
-        $rules['email'][] = 'unique:users,email';
+        $rules['email'][] = 'unique[users,email]';
         $rules['password'][] = 'min:12';
 
         return $rules;
@@ -196,7 +196,7 @@ class User extends Model
 
 One of the most powerful features is that the ORM automatically adjusts `unique` rules during updates.
 
-Consider a user updating their profile. Without adjustment, the `unique:users,email` rule would fail because the user's own email already exists in the database.
+Consider a user updating their profile. Without adjustment, the `unique[users,email]` rule would fail because the user's own email already exists in the database.
 
 ```php
 class User extends Model
@@ -204,7 +204,7 @@ class User extends Model
     #[Column]
     #[Validate([
         'required',
-        'unique:users,email' => 'This email is already taken.'
+        'unique[users,email]' => 'This email is already taken.'
     ])]
     public string $email;
 }
@@ -217,7 +217,7 @@ $user = User::find(1);
 $user->name = 'New Name';
 
 // The ORM automatically transforms the unique rule to:
-// 'unique:users,email,1,id'
+// 'unique[users,email,1,id]'
 // This excludes the current record (ID 1) from the uniqueness check.
 
 $user->save(); // Works correctly!
@@ -232,7 +232,19 @@ During an update:
 4. This tells the validator: "Check uniqueness, but ignore the record with this primary key."
 
 > [!NOTE]
-> The automatic adjustment only works if the `unique` rule uses the 2-parameter format: `unique[table, column]`. It does NOT work with 1-parameter `unique` or other formats.
+> The automatic adjustment only works if the `unique` rule uses the **2-parameter format**: `unique[table, column]`. It does NOT work with the 1-parameter `unique` or other formats.
+>
+> **Example — works correctly (auto-adjusted on update):**
+> ```php
+> #[Validate(['email' => 'unique[users,email]'])]
+> ```
+> During update, the ORM transforms this to `unique[users,email,1,id]` (excluding the current record).
+>
+> **Example — NOT auto-adjusted (will fail on update):**
+> ```php
+> #[Validate(['email' => 'unique'])] // ❌ No table/column specified
+> ```
+> The ORM does not know which table and column to check, so it cannot exclude the current record. You would need to manually write `unique[users,email,1,id]` yourself.
 
 ---
 
@@ -251,7 +263,7 @@ The available validation rules depend on your application's validator service. H
 | `numeric` | Must be numeric | `'numeric'` |
 | `integer` | Must be an integer | `'integer'` |
 | `url` | Must be a valid URL | `'url'` |
-| `unique:table,column` | Must be unique in the database | `'unique:users,email'` |
+| `unique[table,column]` | Must be unique in the database | `'unique[users,email]'` |
 | `confirmed` | Must match `{field}_confirmation` | `'confirmed'` |
 | `in:val1,val2,...` | Must be one of the listed values | `'in:active,pending'` |
 

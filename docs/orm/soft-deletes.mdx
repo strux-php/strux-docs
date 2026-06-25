@@ -30,40 +30,45 @@ class Post extends Model
 }
 ```
 
-### Step 2: Add the Deleted At Column to Your Table
+### Step 2: Add the Deleted At Column
 
 ```php
-// In your Entity class (or migration)
-#[Column(type: ColumnType::DATETIME, nullable: true)]
-protected ?DateTimeImmutable $deletedAt = null;
+#[SoftDelete(column: 'deleted_at')]
+class Post extends Model
+{
+    use HasSoftDeletes;
+
+    #[Column(type: Field::dateTime, nullable: true)]
+    public ?string $deletedAt = null;
+}
 ```
 
 > [!NOTE]
-> The column name defaults to `deleted_at`. If you want to use a different name, override it in the `#[SoftDelete]` attribute.
+> The column name defaults to `deleted_at`. You can change it by passing a different name to `#[SoftDelete(column: 'custom_column')]`.
 
 ---
 
 ## 2. How Soft Deletes Work
 
-Once soft deletes are enabled, calling `delete()` on a model does not remove the row — it sets the `deleted_at` field to the current timestamp:
+Once soft deletes are enabled, calling `delete()` on a model does not remove the row — it sets the `deleted_at` field to the current timestamp and calls `save()`:
 
 ```php
 $post = Post::find(1);
 
 // Normal: returns the post
-var_dump($post->deletedAt); // null
+$post->deletedAt; // null
 
 // Delete the post (soft delete)
 $post->delete();
 
 // Now: deletedAt is set
-var_dump($post->deletedAt); // 2026-06-24 15:30:00
+$post->deletedAt; // '2026-06-24 15:30:00'
 
 // The record is still in the database, but...
 // Post::all() will NOT include it
 ```
 
-Behind the scenes, this happens:
+Behind the scenes:
 
 ```
 Before delete:
@@ -79,6 +84,13 @@ After delete (soft):
 
 > [!CAUTION]
 > The row is never removed. If you have unique indexes on certain columns, a soft-deleted record can prevent creating a new record with the same value.
+
+### Events Fired During Soft Deletes
+
+| Action | Events Fired |
+|--------|-------------|
+| `delete()` | `Deleting` → (sets timestamp + saves) → `Deleted` |
+| `restore()` | `Restoring` → (clears timestamp + saves) → `Restored` |
 
 ---
 
@@ -100,7 +112,7 @@ $post = Post::find(1);
 
 ### Including Soft-Deleted Records
 
-Use `withTrashed()` to include soft-deleted records in the query:
+Use `Post::withTrashed()` to include soft-deleted records:
 
 ```php
 // Returns ALL posts, including soft-deleted ones
@@ -113,7 +125,7 @@ $post = Post::withTrashed()->find(1);
 
 ### Only Soft-Deleted Records
 
-Use `onlyTrashed()` to get ONLY the soft-deleted records:
+Use `Post::onlyTrashed()` to get ONLY the soft-deleted records:
 
 ```php
 // Returns only deleted posts
@@ -125,7 +137,7 @@ $deletedPosts = Post::onlyTrashed()->get();
 
 ## 4. Restoring Soft-Deleted Records
 
-Use the `restore()` method to bring a soft-deleted record back:
+Use `restore()` to bring a soft-deleted record back:
 
 ```php
 $post = Post::withTrashed()->find(1);
@@ -153,7 +165,7 @@ If you truly want to remove a record, use `forceDelete()`:
 ```php
 $post = Post::withTrashed()->find(1);
 
-// Permanently remove from database
+// Permanently remove from database (calls the original Model::delete)
 $post->forceDelete();
 // SQL: DELETE FROM posts WHERE id = 1
 
@@ -167,23 +179,11 @@ $post->forceDelete();
 
 ## 6. Checking Deletion Status
 
-The trait provides several helper methods to check the deletion status:
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `trashed()` | `bool` | Whether this record is soft-deleted |
-| `trashedById(int $id)` | `bool` | Whether a record with the given ID is soft-deleted (static) |
-
 ```php
 $post = Post::withTrashed()->find(1);
 
 if ($post->trashed()) {
     echo 'This post is in the trash.';
-}
-
-// Static check
-if (Post::trashedById(1)) {
-    echo 'Post 1 has been soft-deleted.';
 }
 ```
 
@@ -191,27 +191,21 @@ if (Post::trashedById(1)) {
 
 ## 7. Complete Method Reference
 
-### Model Instance Methods
+### Instance Methods
 
 | Method | Description |
 |--------|-------------|
-| `delete()` | Soft-delete (sets `deleted_at` to now) |
-| `forceDelete()` | Permanently remove from database |
-| `restore()` | Restore a soft-deleted record |
-| `trashed()` | Check if this record is soft-deleted |
-
-### Query Builder Methods
-
-| Method | Description |
-|--------|-------------|
-| `withTrashed()` | Include soft-deleted records in results |
-| `onlyTrashed()` | Return only soft-deleted records |
+| `delete()` | Soft-delete (sets `deleted_at` to now and saves) |
+| `forceDelete()` | Permanently remove from database (calls parent `delete()`) |
+| `restore()` | Restore a soft-deleted record (sets `deleted_at` to null and saves) |
+| `trashed()` | Check if this record is soft-deleted (`deleted_at !== null`) |
 
 ### Static Methods
 
-| Method | Description |
-|--------|-------------|
-| `trashedById(int $id)` | Check if a record by ID is soft-deleted |
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `withTrashed()` | `Model` (query builder) | Returns a query builder that includes soft-deleted records |
+| `onlyTrashed()` | `Model` (query builder) | Returns a query builder for only soft-deleted records |
 
 ---
 
@@ -223,14 +217,15 @@ class User extends Model
 {
     use HasSoftDeletes;
 
-    // ... columns including 'deletedAt'
+    #[Column(type: Field::dateTime, nullable: true)]
+    public ?string $deletedAt = null;
 }
 
 // ----- Normal Operations -----
 $user = User::find(1); // Only if not deleted
 
 // ----- Delete -----
-$user->delete(); // Soft delete (sets deleted_at)
+$user->delete(); // Soft delete (sets deleted_at and saves)
 
 // ----- Querying -----
 User::all(); // Only non-deleted
@@ -246,7 +241,6 @@ $user->forceDelete(); // Permanently gone
 
 // ----- Check Status -----
 $user->trashed(); // true or false
-User::trashedById(1); // true or false
 ```
 
 ---
@@ -255,39 +249,42 @@ User::trashedById(1); // true or false
 
 ### When to Use Soft Deletes
 
-✅ **DO use soft deletes when:**
+**DO use soft deletes when:**
 - Users might accidentally delete data
 - You need an "undo" or "trash" feature
-- Compliance requires keeping records (GDPR "right to erasure" is an exception)
+- Compliance requires keeping records
 - You want to keep a historical trail
 
-❌ **DON'T use soft deletes when:**
+**DON'T use soft deletes when:**
 - The data is transient (logs, temporary data)
 - Storage is a concern (soft-deleted records still take space)
 - You have unique indexes that would conflict with soft-deleted rows
 
 ### Handling Unique Constraints
 
-Soft-deleted records can cause issues with unique columns:
+Soft-deleted records can cause issues with unique columns. For example, if you mark a user as soft-deleted, their email is still in the `users` table. Creating a new user with the same email will violate the unique constraint.
 
 ```php
-#[Table(uniqueConstraints: [
-    new UniqueConstraint(columns: ['email'])
-])]
+use Strux\Component\Database\Schema\Attributes\Unique;
+
 class User extends Model
 {
     use HasSoftDeletes;
+
+    #[Column(type: Field::string)]
+    #[Unique]
+    public string $email;
 }
 
-// User with email "test@example.com" is deleted
+// User with email "test@example.com" is soft-deleted
 // You cannot create a new user with the same email
 // because the deleted row still has it!
 ```
 
 **Solutions:**
 1. Use a composite unique index that includes `deleted_at`
-2. Check for conflicts manually before creating
-3. Allow the conflict and handle it at the application level
+2. Append a suffix to the unique field on soft delete (e.g., `deleted_test@example.com`)
+3. Check for conflicts manually before creating
 
 > [!TIP]
 > When querying regularly, the global scope automatically excludes deleted records. You usually don't need to think about soft deletes until you specifically want to find or restore deleted records.

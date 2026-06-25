@@ -23,71 +23,108 @@ The database layer has three main parts that work together like a well-oiled mac
 
 ### The Configuration File
 
-Your database settings live in the configuration. Here is a typical setup:
+Database settings are defined in a PHP class that implements `ConfigInterface`. This config class is shipped with the skeleton app at `src/Config/Database.php` and returns the connection array from a `toArray()` method:
 
 ```php
-// config/database.php
-return [
-    'default' => env('DB_CONNECTION', 'mysql'),
+<?php
 
-    'connections' => [
-        'sqlite' => [
-            'driver' => 'sqlite',
-            'path' => env('DB_PATH', storage_path('database.sqlite')),
-            'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-        ],
+namespace App\Config;
 
-        'mysql' => [
-            'driver' => 'mysql',
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'strux'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
-            'charset' => env('DB_CHARSET', 'utf8mb4'),
-            'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
-        ],
+use PDO;
+use Strux\Component\Config\ConfigInterface;
 
-        'pgsql' => [
-            'driver' => 'pgsql',
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '5432'),
-            'database' => env('DB_DATABASE', 'strux'),
-            'username' => env('DB_USERNAME', 'postgres'),
-            'password' => env('DB_PASSWORD', ''),
-            'schema' => env('DB_SCHEMA', 'public'),
-        ],
+class Database implements ConfigInterface
+{
+    public function toArray(): array
+    {
+        return [
+            'default' => env('DB_CONNECTION', 'sqlite'),
 
-        'sqlsrv' => [
-            'driver' => 'sqlsrv',
-            'host' => env('DB_HOST', 'localhost'),
-            'port' => env('DB_PORT', '1433'),
-            'database' => env('DB_DATABASE', 'strux'),
-            'username' => env('DB_USERNAME', 'sa'),
-            'password' => env('DB_PASSWORD', ''),
-        ],
+            'connections' => [
+                'sqlite' => [
+                    'driver' => 'sqlite',
+                    'path' => env('DB_PATH', ROOT_PATH . '/var/database/app.db'),
+                    'prefix' => '',
+                    'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+                ],
 
-        'oracle' => [
-            'driver' => 'oracle',
-            'host' => env('DB_HOST', '127.0.0.1'),
-            'port' => env('DB_PORT', '1521'),
-            'database' => env('DB_DATABASE', 'XEPDB1'),
-            'username' => env('DB_USERNAME', 'strux'),
-            'password' => env('DB_PASSWORD', ''),
-            'charset' => env('DB_CHARSET', 'AL32UTF8'),
-        ],
-    ],
+                'mysql' => [
+                    'driver' => 'mysql',
+                    'host' => env('DB_HOST', '127.0.0.1'),
+                    'port' => env('DB_PORT', '3306'),
+                    'database' => env('DB_DATABASE'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'unix_socket' => env('DB_SOCKET', ''),
+                    'charset' => 'utf8mb4',
+                    'collation' => 'utf8mb4_unicode_ci',
+                    'prefix' => '',
+                    'strict' => true,
+                    'engine' => null,
+                ],
 
-    'global_options' => [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ],
-];
+                'mariadb' => [
+                    'driver' => 'mariadb',
+                    'host' => env('DB_HOST', '127.0.0.1'),
+                    'port' => env('DB_PORT', '3306'),
+                    'database' => env('DB_DATABASE'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'unix_socket' => env('DB_SOCKET', ''),
+                    'charset' => 'utf8mb4',
+                    'collation' => 'utf8mb4_unicode_ci',
+                    'prefix' => '',
+                    'strict' => true,
+                    'engine' => null,
+                ],
+
+                'pgsql' => [
+                    'driver' => 'pgsql',
+                    'host' => env('DB_HOST', '127.0.0.1'),
+                    'port' => env('DB_PORT', '5432'),
+                    'database' => env('DB_DATABASE'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'charset' => 'utf8',
+                    'prefix' => '',
+                    'schema' => 'public',
+                ],
+
+                'sqlsrv' => [
+                    'driver' => 'sqlsrv',
+                    'host' => env('DB_HOST', 'localhost'),
+                    'port' => env('DB_PORT', '1433'),
+                    'database' => env('DB_DATABASE'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'charset' => 'utf8',
+                    'prefix' => '',
+                ],
+
+                'oracle' => [
+                    'driver' => 'oracle',
+                    'host' => env('DB_HOST', '127.0.0.1'),
+                    'port' => env('DB_PORT', '1521'),
+                    'database' => env('DB_DATABASE', 'XEPDB1'),
+                    'username' => env('DB_USERNAME'),
+                    'password' => env('DB_PASSWORD'),
+                    'charset' => env('DB_CHARSET', 'AL32UTF8'),
+                    'prefix' => '',
+                ],
+            ],
+
+            'fetch' => PDO::FETCH_ASSOC,
+            'global_options' => [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ],
+        ];
+    }
+}
 ```
 
 > [!TIP]
-> You can use the `.env` file to switch databases without touching your code. Just change `DB_CONNECTION=mysql` to `DB_CONNECTION=pgsql` and update the connection details.
+> Use the `.env` file to switch databases without touching your code. Just change `DB_CONNECTION=mysql` to `DB_CONNECTION=pgsql` and update the connection details.
 
 ### Read/Write Splitting
 
