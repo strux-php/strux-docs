@@ -671,8 +671,9 @@ SELECT * FROM users WHERE id > 200 ORDER BY id LIMIT 100
 | `all()` | Get all records (no conditions) |
 | `first()` | Get first record or null |
 | `last()` | Get last record or null |
-| `find($id)` | Find by primary key |
+| `find($id, $includes = [])` | Find by primary key, with optional eager loading |
 | `findOrFail($id)` | Find by PK or throw |
+| `with(...$relations)` | Eager load relations (alias of `include()`) |
 | `exists()` | Check if any records match |
 
 ### Aggregate Methods

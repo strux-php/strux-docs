@@ -524,11 +524,14 @@ If there are 10 brands, this runs:
 
 That is **11 queries total**. With 100 brands, that is **101 queries**. This is the N+1 problem.
 
-### The Solution: Eager Loading with `include()`
+### The Solution: Eager Loading with `include()` / `with()`
 
 ```php
 // Eager load products for ALL brands in just 2 queries
 $brands = Brand::include('products')->get();
+
+// `with()` is a convenient alias for `include()`
+$brands = Brand::with('products')->get();
 
 foreach ($brands as $brand) {
     // Products are already loaded in memory!
@@ -546,7 +549,15 @@ Now:
 You can filter which related records are loaded:
 
 ```php
+// Using include()
 $brands = Brand::include([
+    'products' => function ($query) {
+        $query->where('active', 1)->orderBy('price', 'ASC');
+    }
+])->get();
+
+// Same with with() alias
+$brands = Brand::with([
     'products' => function ($query) {
         $query->where('active', 1)->orderBy('price', 'ASC');
     }
@@ -561,11 +572,20 @@ Load deeply nested relationships:
 // Load products, and for each product load its category
 $brands = Brand::include('products.category')->get();
 
+// Same with with() alias
+$brands = Brand::with('products.category')->get();
+
 // Even deeper: products -> category -> parent category
 $brands = Brand::include('products.category.parent')->get();
+$brands = Brand::with('products.category.parent')->get();
 
 // You can specify multiple nested relations
 $brands = Brand::include([
+    'products.category',
+    'reviews'
+])->get();
+
+$brands = Brand::with([
     'products.category',
     'reviews'
 ])->get();
@@ -600,14 +620,14 @@ $brands = Brand::query()->without('products')->get();
 
 | Aspect | Lazy Loading | Eager Loading |
 |--------|-------------|---------------|
-| When it loads | On first property access | Immediately, via `include()` |
+| When it loads | On first property access | Immediately, via `include()` / `with()` |
 | Number of queries | 1 + N (one per parent + one per child) | 2 total (regardless of scale) |
 | Memory usage | Lower (loads on demand) | Higher (loads everything at once) |
 | Best for | Single model views | Lists and collections |
-| Syntax | `$model->relation` | `Model::include('relation')->get()` |
+| Syntax | `$model->relation` | `Model::include('relation')->get()` or `Model::with('relation')->get()` |
 
 > [!TIP]
-| As a general rule: if you are in a loop iterating over multiple models and accessing a relationship, you should have used `include()`. If you are accessing a single model's relationship, lazy loading is fine.
+| As a general rule: if you are in a loop iterating over multiple models and accessing a relationship, you should have used `include()` or `with()`. If you are accessing a single model's relationship, lazy loading is fine.
 
 ---
 
@@ -772,6 +792,14 @@ class Role extends Model
 
 // Eager load everything
 $user = User::include([
+    'profile',
+    'posts.comments',
+    'posts.featuredImage',
+    'roles'
+])->find(1);
+
+// Same with with() alias
+$user = User::with([
     'profile',
     'posts.comments',
     'posts.featuredImage',

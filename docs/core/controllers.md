@@ -209,7 +209,7 @@ The root class that provides:
 - **11 optional dependencies** via constructor injection (container, request, response factory, PDO, session, logger, view engine, event dispatcher, flash messages, auth manager, form factory)
 - **Response helpers**: `createResponse()`, `json()`, `redirect()`, `redirectWith()`
 - **View helper**: `view()` for rendering templates
-- **Auth helper**: `auth()` for authentication
+- **Auth helper**: `$this->auth` for authentication
 - **Logging helpers**: `logError()`, `logWarning()`, `logInfo()`
 - **Routing helper**: `route()` for generating URLs, `toRoute()` for redirecting to named routes
 - **Authorization helper**: `authorize()` for permission checks
@@ -320,7 +320,116 @@ public function show(string $slug): Response {}  // Matches any slug
 > [!TIP]
 > Use the colon syntax (`:id`) for route parameters, not the curly brace syntax (`{id}`). The colon syntax is the modern recommended format.
 
-### Optional Parameters
+### Route Model Binding
+
+Instead of manually looking up a model by ID, you can type-hint the model class directly. The framework will automatically find the model using the route parameter and inject it into your method.
+
+**Route:**
+```php
+#[Route('/artworks/:artwork', methods: ['GET'], name: 'artworks.show')]
+```
+
+**Controller:**
+```php
+public function show(Artwork $artwork): Response
+{
+    // $artwork is already fetched from the database!
+    // Equivalent to: $artwork = Artwork::find($routeParamValue);
+
+    return $this->view('artworks/show', ['artwork' => $artwork]);
+}
+```
+
+**How it works:**
+
+1. The URL contains a route parameter (`:artwork`).
+2. Your method parameter is type-hinted with a Model class (`Artwork`).
+3. The framework checks if a route parameter exists with the same name as the parameter (`artwork`).
+4. It calls `Artwork::find($value)` using that route parameter's value.
+5. If found, the model is injected directly into your method.
+6. If **not found** (e.g., the ID does not exist), a `404 Not Found` response is returned automatically.
+
+**Fallback to `:id`:**
+
+If there is no route parameter with the same name as your method parameter, the framework falls back to looking for a route parameter named `:id`:
+
+```php
+#[Route('/artworks/:id', methods: ['GET'], name: 'artworks.show')]
+public function show(Artwork $artwork): Response
+{
+    // Falls back to :id → Artwork::find($id)
+}
+```
+
+**Both conventions work:**
+
+```php
+// Convention 1: Parameter name matches route param
+#[Route('/artworks/:artwork')]
+public function show(Artwork $artwork): Response { ... }
+
+// Convention 2: Route param is :id, falls back automatically
+#[Route('/artworks/:id')]
+public function show(Artwork $artwork): Response { ... }
+
+// Convention 3: Different parameter name — use @RequestParam
+#[Route('/users/:userId')]
+public function show(#[RequestParam(name: 'userId')] Artwork $artwork): Response { ... }
+```
+
+> [!NOTE]
+> Route model binding only works with classes that extend `Strux\Component\Database\ORM\Model`. It does NOT work with plain PHP classes or DTOs.
+
+> [!TIP]
+> Need to look up by a different column (slug, uuid), eager-load relations, or use an interface? See **[The `#[RouteEntity]` Attribute](#the-routeentity-attribute)** just below.
+
+#### The `#[RouteEntity]` Attribute
+
+For advanced use cases — custom column mapping, eager loading, or interface-based models — use the `#[RouteEntity]` attribute on the parameter:
+
+```php
+use Strux\Component\Routing\Attributes\RouteEntity;
+
+// Map :slug route param to the 'slug' column, eager-load artist + categories
+#[Route('/artworks/:slug')]
+public function show(
+    #[RouteEntity(mapping: ['slug' => 'slug'], with: ['artist', 'categories'])]
+    Artwork $artwork
+): Response {
+    // $artwork is found by slug, with artist and categories pre-loaded
+}
+```
+
+**Attribute Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mapping` | `array` | `['id' => 'id']` | Route parameter → database column mapping |
+| `with` | `array` | `[]` | Relations to eager load using `with()` |
+
+**Key features:**
+
+- **Custom column lookup**: Instead of always querying by primary key (`id`), map any route parameter to any column (`'slug' => 'slug'`, `'uuid' => 'uuid'`, etc.)
+- **Multiple conditions**: Pass multiple mappings for composite lookups:
+  ```php
+  #[Route('/artworks/:slug/:locale')]
+  public function show(
+      #[RouteEntity(mapping: ['slug' => 'slug', 'locale' => 'locale'])]
+      Artwork $artwork
+  ): Response { }
+  ```
+- **Eager loading**: Specify relations to eager load via `with`, eliminating N+1 queries from the start. Uses the same syntax as `Model::with('relation')`.
+- **Interface support**: If the parameter is type-hinted with an interface (e.g., `InvoiceInterface`), the framework resolves the concrete class from the container, then performs model binding:
+  ```php
+  // Container resolves InvoiceInterface → Invoice (a Model subclass)
+  #[Route('/invoices/:id')]
+  public function show(
+      #[RouteEntity(mapping: ['id' => 'id'], with: ['items', 'customer'])]
+      InvoiceInterface $invoice
+  ): Response { }
+  ```
+
+**Without `#[RouteEntity]`**, the framework behaves exactly as before — matching by parameter name or falling back to `:id`. The attribute is purely additive and fully backward compatible.
 
 Sometimes a parameter might not be there. For example, a blog category page might show all posts, or only posts in a specific category:
 
@@ -441,7 +550,7 @@ public function store(Request $request): Response
 | Property | Type | Description |
 |----------|------|-------------|
 | `$this->request` | `Request` | The current HTTP request |
-| `$this->auth` | `AuthManager` | Authentication manager (login, register, user info) |
+| `$this->auth` | `AuthProxy` | Authentication proxy — login, logout, user info, policy checks |
 | `$this->session` | `SessionInterface` | Session data and management |
 | `$this->flash` | `FlashInterface` | Flash messages (one-time notifications) |
 | `$this->db` | `PDO` | Direct database connection |
@@ -742,13 +851,24 @@ class AdminController extends Controller
 
 ## 13. Authorization with `#[Authorize]]
 
-The `#[Authorize]` attribute controls who can access a controller or method based on roles and permissions:
+The `#[Authorize]` attribute controls who can access a controller or method. It supports three levels of access control — roles, permissions, and policy-based authorities:
 
 > [!NOTE]
 > For a complete guide on authentication and authorization, see the [Auth documentation](/docs/security/auth-intro).
 
+### Attribute Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `roles` | `array` | `[]` | Required role slugs |
+| `permissions` | `array` | `[]` | Required permission slugs |
+| `ability` | `?string` | `null` | Explicit policy ability (overrides auto-detection) |
+| `authorities` | `array` | `[]` | `[ResourceClass, PolicyClass]` for policy-based authorization |
+
+### Role & Permission Checks
+
 ```php
-use Strux\Component\Http\Attribute\Authorize;
+use Strux\Auth\Attributes\Authorize;
 
 #[Prefix('/admin')]
 #[Authorize(roles: ['admin'])]
@@ -767,6 +887,122 @@ class AdminController extends Controller
 
 > [!WARNING]
 > `#[Authorize]` and `#[Middleware]` are two different things. Middleware runs code before the controller. Authorization checks a user's permissions. You typically use both together.
+
+### Policy-Based Authorization (`authorities`)
+
+For resource-level authorization, use `authorities` with an optional `ability`. The framework will run the matching policy method against the resolved model.
+
+**Step 1: Define the Policy**
+
+```php
+namespace App\Domain\Tickets\Policies;
+
+class TicketPolicy
+{
+    public function canView(User $user, Ticket $ticket): bool
+    {
+        return $user->id === $ticket->assignee_id || $user->hasRole('admin');
+    }
+
+    public function canUpdate(User $user, Ticket $ticket): bool
+    {
+        return $user->id === $ticket->assignee_id || $user->hasPermission('tickets-edit');
+    }
+
+    public function canDelete(User $user, Ticket $ticket): bool
+    {
+        return $user->hasRole('admin');
+    }
+}
+```
+
+**Step 2a: Register the policy on the entity via `#[Policy]` (recommended)**
+
+```php
+use Strux\Auth\Attributes\Policy;
+
+#[Entity(table: 'tickets')]
+#[Policy(TicketPolicy::class)]
+class Ticket extends Model
+{
+    // ...
+}
+```
+
+Then use `#[Authorize]` without explicit `authorities` — the framework reads `#[Policy]` from the entity and resolves the resource from route params:
+
+```php
+#[Route('/tickets/:ticket')]
+#[Authorize]                          // GET → ability: 'view', policy from #[Policy]
+public function show(Ticket $ticket): Response { ... }
+
+#[Route('/tickets/:ticket')]
+#[Authorize]                          // POST → ability: 'create'
+public function store(Ticket $ticket): Response { ... }
+
+#[Route('/tickets/:ticket')]
+#[Authorize]                          // PUT → ability: 'update'
+public function update(Ticket $ticket): Response { ... }
+
+#[Route('/tickets/:ticket')]
+#[Authorize]                          // DELETE → ability: 'delete'
+public function destroy(Ticket $ticket): Response { ... }
+```
+
+**Step 2b: Override the policy inline**
+
+If you need a different policy for a specific action, use `authorities` directly:
+
+```php
+#[Route('/tickets/:ticket/archive')]
+#[Authorize(ability: 'archive', authorities: [Ticket::class, SpecialArchivePolicy::class])]
+public function archive(Ticket $ticket): Response { ... }
+```
+
+**Step 3: Explicit ability (optional)**
+
+The framework derives the ability automatically from the HTTP method and controller method name:
+
+| Controller Method | HTTP Method | Derived Ability |
+|------------------|-------------|-----------------|
+| `index()` / `list()` | GET | `list` |
+| `show()` / `view()` | GET | `view` |
+| `create()` / `store()` | POST | `create` |
+| `edit()` / `update()` | PUT/PATCH | `update` |
+| `destroy()` / `delete()` | DELETE | `delete` |
+
+Override with the `ability` parameter:
+
+```php
+#[Authorize(ability: 'archive')]
+public function archive(Ticket $ticket): Response { ... }
+```
+
+**How it works:**
+1. The middleware reads `#[Authorize]` from the controller class/method.
+2. If `authorities` is set, it uses the inline `[ResourceClass, PolicyClass]`.
+3. If only `#[Authorize]` is present (no authorities), it checks `#[Policy]` on the resource entity.
+4. The resource model is resolved from route params — respecting `#[RouteEntity]` mapping if present.
+5. The ability method is called: `$policy->canView($user, $ticket)`.
+6. If the check fails, a `403 Forbidden` response is returned.
+
+### Programmatic Authorization
+
+Use `Auth::can()` or `Auth::cannot()` for policy checks inside controllers, services, or views:
+
+```php
+use Strux\Auth\Auth;
+
+if (Auth::can('update', $ticket)) {
+    // User is authorized to update this ticket
+}
+
+if (Auth::cannot('delete', $ticket)) {
+    throw new AuthorizationException('Forbidden', 403);
+}
+```
+
+This reads `#[Policy]` from the entity class automatically.
 
 ---
 

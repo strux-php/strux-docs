@@ -27,16 +27,60 @@ The default user model includes standard authentication fields, automatically co
 
 The heart of the authentication system is the `AuthManager`. This service acts as the central hub for all authentication activities, from logging in users to resolving role-based redirects.
 
-You can access the `AuthManager` anywhere via Dependency Injection, or use the globally available `auth()` helper function.
+You can access the auth system via `$this->auth` in any controller, or use the `Auth` facade globally:
 
 ```php
-// Using the helper
-$user = auth()->user();
-$isLoggedIn = auth()->isAuthenticated();
+// In a controller
+$user = $this->auth->user();
+$isLoggedIn = $this->auth->isAuthenticated();
+$redirectUrl = $this->auth->redirectFor($user);
 
-// Resolving dynamic redirects based on user roles
-$redirectUrl = auth()->redirectFor($user);
+// Globally (anywhere)
+use Strux\Auth\Auth;
+$user = Auth::user();
+$isLoggedIn = Auth::isAuthenticated();
+$redirectUrl = Auth::redirectFor($user);
 ```
+
+### The `Auth` Facade
+
+For convenience, a static `Auth` facade provides quick access to common auth operations from anywhere:
+
+```php
+use Strux\Auth\Auth;
+
+// Authentication
+Auth::authenticate($credentials, remember: true);  // Returns bool
+Auth::validate($credentials);                       // Returns bool (no login)
+Auth::login($user, remember: false);                 // Manual login
+Auth::logout();                                      // Logout + clear remember me
+
+// State Checks
+Auth::user();                // Returns User object or null
+Auth::isAuthenticated();     // Returns bool
+Auth::id();                  // Returns user ID or null
+
+// Policy Checks
+Auth::can('view', $ticket);    // Read #[Policy] from Ticket entity
+Auth::cannot('delete', $ticket);
+```
+
+### Policy-Based Authorization (`#[Policy]`)
+
+Instead of configuring policy-to-entity mappings in a config file, attach the `#[Policy]` attribute directly on your entity class:
+
+```php
+use Strux\Auth\Attributes\Policy;
+
+#[Entity(table: 'tickets')]
+#[Policy(TicketPolicy::class)]
+class Ticket extends Model
+{
+    // ...
+}
+```
+
+The `Authorizer` reads this attribute automatically when you call `Auth::can()`. Combined with `#[Authorize]` on controllers, this creates a fully attribute-driven authorization layer — no config files needed.
 
 ## Next Steps
 

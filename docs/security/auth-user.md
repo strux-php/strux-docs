@@ -49,7 +49,7 @@ Open your `src/Config/Auth.php` configuration file and update the `model` proper
     ],
 ```
 
-And that's it! When a user logs in, the Auth system will now instantiate *your* `App\Domain\Identity\Entity\User` class. You can access their custom fields anywhere: `auth()->user()->bio`.
+And that's it! When a user logs in, the Auth system will now instantiate *your* `App\Domain\Identity\Entity\User` class. You can access their custom fields anywhere: `$this->auth->user()->bio` in a controller, or `Auth::user()->bio` globally.
 
 ---
 

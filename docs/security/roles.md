@@ -34,11 +34,11 @@ When you need to send a user to their designated homepage (for example, at the e
 
 ```php
 // In your controller...
-$user = $this->authManager->sentinel('web')->user();
+$user = $this->auth->user();
 
 // The AuthManager will automatically check the user's roles against the 
 // redirect_map in your config, and return the correct URL!
-$redirectUrl = $this->authManager->redirectFor($user);
+$redirectUrl = $this->auth->redirectFor($user);
 
 return $this->redirect($redirectUrl);
 ```

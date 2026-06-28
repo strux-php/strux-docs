@@ -65,7 +65,7 @@ class AuthController extends Controller
                     }
 
                     // 7. Automatically log them in
-                    $this->authManager->sentinel('web')->login($user);
+                    $this->auth->login($user);
 
                     // 8. Redirect to their new dashboard
                     $this->flash->set('success', 'Account created successfully. Welcome aboard!');

@@ -159,6 +159,14 @@ $user->save();
 $user = User::find(1); // Returns the User with ID 1, or null if not found
 ```
 
+You can eager-load relations directly with `find()`:
+
+```php
+$user = User::with('posts', 'profile')->find(1);
+```
+
+> `with()` is a convenient alias for `include()`. Both methods work identically.
+
 #### Find or Fail
 
 ```php
@@ -655,6 +663,10 @@ User::preventLazyLoading(true);
 // Now accessing an unloaded relationship throws a LazyLoadingViolationException
 $user = User::find(1);
 $roles = $user->roles; // Throws LazyLoadingViolationException!
+
+// You must eager-load explicitly: use with() (or include())
+$user = User::with('roles')->find(1);
+$roles = $user->roles; // OK — already loaded
 ```
 
 > [!TIP]
@@ -717,7 +729,9 @@ Here is the complete lifecycle of a model from creation to deletion:
 | `query()` | `static::query(): Model` | Returns a new query builder instance |
 | `create()` | `static::create(array $attributes): static` | Creates and saves a new model |
 | `update()` | `static::update(mixed $id, array $attributes): ?static` | Finds and updates a record |
-| `find()` | `static::find(mixed $id): ?static` | Finds by primary key |
+| `find()` | `static::find(mixed $id, array $includes = []): ?static` | Finds by primary key, with optional eager loading |
+| `with()` | `static::with(mixed ...$relations): static` | Eager load relations (alias of `include()`) |
+| `include()` | `static::include(mixed ...$relations): static` | Eager load relations |
 | `findOrFail()` | `static::findOrFail(mixed $id): static` | Finds by PK, throws if not found |
 | `all()` | `static::all(): Collection` | Returns all records |
 | `destroy()` | `static::destroy(mixed $ids): int` | Deletes by primary key(s) |

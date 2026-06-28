@@ -36,16 +36,16 @@ class AuthController extends Controller
         // 2. Process POST requests
         if ($this->request->is('POST') && $form->isValid()) {
             
-            // 3. Attempt Authentication
-            if ($this->authManager->sentinel('web')->authenticate([
+            // 3. Attempt Authentication (second param enables "Remember Me")
+            if ($this->auth->authenticate([
                 'email' => strtolower($form->get('email')),
                 'password' => $form->get('password')
-            ])) {
+            ], remember: $form->has('remember'))) {
                 /** @var User $user */
-                $user = $this->authManager->sentinel('web')->user();
+                $user = $this->auth->user();
                 
                 // 4. Resolve their role-specific dashboard URL
-                $resolvedRedirect = $this->authManager->redirectFor($user);
+                $resolvedRedirect = $this->auth->redirectFor($user);
                 
                 $this->flash->set('success', 'Logged in successfully. Welcome back!');
                 return $this->redirect($resolvedRedirect);
@@ -67,7 +67,7 @@ class AuthController extends Controller
     public function logout(): Response
     {
         // Destroy the user's session securely
-        $this->authManager->sentinel('web')->logout();
+        $this->auth->logout();
         
         $this->flash->set('success', 'You have been logged out successfully.');
         return $this->redirect('/login');
@@ -84,11 +84,11 @@ You can check if a user is currently logged in at any time, either in your Contr
 
 ### In Controllers:
 ```php
-$isLoggedIn = $this->authManager->sentinel()->isAuthenticated();
+$isLoggedIn = $this->auth->isAuthenticated();
 
 if ($isLoggedIn) {
     /** @var User $user */
-    $user = $this->authManager->sentinel()->user();
+    $user = $this->auth->user();
     echo "Welcome back, " . $user->name;
 }
 ```
@@ -105,4 +105,46 @@ By injecting your authentication state into a Global Twig Context (like an `AppC
 {% else %}
     <a href="{{ route('auth.login') }}">Sign In</a>
 {% endif %}
+```
+
+## Remember Me ("Stay Logged In")
+
+The framework supports persistent "Remember Me" tokens that keep users logged in across browser sessions. The `User` entity already includes a `remember_token` column.
+
+### Enabling Remember Me
+
+Pass `remember: true` to `authenticate()` or `login()`:
+
+```php
+// During login with credentials
+Auth::authenticate([
+    'email' => $email,
+    'password' => $password
+], remember: true);
+
+// Auto-login after registration
+Auth::login($user, remember: true);
+```
+
+### How It Works
+
+1. **On login**: A cryptographically random 60-byte token is generated. The SHA-256 hash is stored in the user's `remember_token` column. The raw token is set as an httpOnly, SameSite=Lax cookie (`remember_me`) with a 30-day expiry.
+2. **On subsequent requests**: If no session exists, the sentinel checks the `remember_me` cookie. If the token matches the stored hash, the user is automatically logged in and the token is rotated (new token issued, old one invalidated).
+3. **On logout**: The cookie is cleared and `remember_token` is nulled in the database.
+
+### Configuration
+
+Remember-me settings are configured in `auth.sentinels.web`:
+
+```php
+// src\Config\Auth.php
+'sentinels' => [
+    'web' => [
+        'remember_duration' => 2_592_000,   // 30 days (default)
+        'cookie_path'       => '/',
+        'cookie_domain'     => '',
+        'cookie_secure'     => false,       // Set true in production with HTTPS
+        'cookie_http_only'  => true,
+    ],
+],
 ```
