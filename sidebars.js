@@ -106,10 +106,14 @@ const sidebars = {
             collapsed: false,
             items: [
                 { type: 'doc', id: 'core/cookies', label: 'Cookies' },
-                { type: 'doc', id: 'security/introduction', label: 'General Security' },
                 { type: 'doc', id: 'validation/validation', label: 'Validation' },
-                { type: 'doc', id: 'security/csrf', label: 'CSRF Protection' },
-                { type: 'doc', id: 'security/passwords', label: 'Password' },
+                { type: 'doc', id: 'security/auth-intro', label: 'Auth Introduction' },
+                { type: 'doc', id: 'security/login', label: 'Login & Remember Me' },
+                { type: 'doc', id: 'security/signup', label: 'Registration & Verification' },
+                { type: 'doc', id: 'security/passwords', label: 'Password Recovery' },
+                { type: 'doc', id: 'security/roles', label: 'Roles & Permissions' },
+                { type: 'doc', id: 'security/protecting-routes', label: 'Protecting Routes' },
+                { type: 'doc', id: 'security/auth-user', label: 'Custom User Model' },
             ],
         },
         {
